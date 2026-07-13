@@ -1,4 +1,4 @@
-# GLM Code
+# Make No Mistakes
 
 A Claude Code-style coding agent that is **100% free** to run — as a polished
 **desktop app** (Apple-style liquid glass over a cinematic background) or in
@@ -18,19 +18,24 @@ anything destructive (unless you put it in auto mode).
 
 1. **Get a free API key** — sign up at [z.ai](https://z.ai) (free, no credit
    card), open your profile menu → **API Keys** → create a key.
-2. **Install**:
+2. **Get the code** — clone it into a `Make No Mistakes` folder:
    ```powershell
-   cd C:\Users\theo\GLMCode
+   cd C:\Users\theo
+   git clone https://github.com/PellkvistDev/Make-No-Mistakes.git "Make No Mistakes"
+   ```
+3. **Install**:
+   ```powershell
+   cd "C:\Users\theo\Make No Mistakes"
    .\install.ps1
    ```
-3. Set your API key as an environment variable (this is where GLM Code reads
+4. Set your API key as an environment variable (this is where Make No Mistakes reads
    it from):
    ```powershell
    setx ZAI_API_KEY your-key-here
    ```
    (Or just run `glm` — on first run it asks for the key and saves it as the
    `ZAI_API_KEY` user environment variable for you.)
-4. Launch the **desktop app** with the "GLM Code" desktop shortcut, or from a
+5. Launch the **desktop app** with the "Make No Mistakes" desktop shortcut, or from a
    new terminal:
    ```powershell
    glmapp
@@ -135,7 +140,7 @@ model doesn't follow instructions embedded in web content.
 
 ## Notes on the free tier
 
-- z.ai's free Flash tier is rate-limited (~1 request/second). GLM Code
+- z.ai's free Flash tier is rate-limited (~1 request/second). Make No Mistakes
   automatically retries with backoff on rate-limit errors, so heavy agentic
   bursts just slow down rather than fail.
 - Both models are also open-weight (MIT) on Hugging Face, so if the free API

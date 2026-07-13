@@ -1,1 +1,1 @@
-"""GLM Code desktop app (pywebview + WebView2)."""
+"""Make No Mistakes desktop app (pywebview + WebView2)."""

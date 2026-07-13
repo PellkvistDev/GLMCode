@@ -1,4 +1,4 @@
-"""GLM Code desktop app: pywebview window + JS bridge around the agent core."""
+"""Make No Mistakes desktop app: pywebview window + JS bridge around the agent core."""
 
 from __future__ import annotations
 
@@ -583,7 +583,7 @@ def main():
     index = WEB_DIR / "index.html"
     if not index.is_file():
         _startup_log(f"ABORT missing web assets: {index}")
-        _show_error("GLM Code",
+        _show_error("Make No Mistakes",
                     f"Missing web assets: {index}\n"
                     f"Make sure the glmcode/gui/web/ folder was extracted correctly.")
         return
@@ -593,7 +593,7 @@ def main():
 
     _startup_log("creating window")
     window = webview.create_window(
-        title="GLM Code",
+        title="Make No Mistakes",
         url=str(index),
         js_api=api,
         width=1240,
@@ -651,7 +651,7 @@ def main():
         _startup_log("webview.start returned (window closed normally)")
     except Exception as e:
         _startup_log(f"webview.start raised {type(e).__name__}: {e}")
-        _show_error("GLM Code - webview failed",
+        _show_error("Make No Mistakes - webview failed",
                     f"{type(e).__name__}: {e}\n\n"
                     f"Make sure WebView2 is installed:\n"
                     f"https://developer.microsoft.com/en-us/microsoft-edge/webview2/\n\n"
@@ -664,4 +664,4 @@ if __name__ == "__main__":
     try:
         main()
     except Exception:
-        _show_error("GLM Code crashed", traceback.format_exc())
+        _show_error("Make No Mistakes crashed", traceback.format_exc())

@@ -24,5 +24,5 @@ if __name__ == "__main__":
         from .app import main
         main()
     except Exception:
-        _show_error("GLM Code crashed", traceback.format_exc())
+        _show_error("Make No Mistakes crashed", traceback.format_exc())
         sys.exit(1)

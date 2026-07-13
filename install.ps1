@@ -1,9 +1,9 @@
-# GLM Code installer: installs dependencies, puts `glm`/`glmapp` on your PATH,
+# Make No Mistakes installer: installs dependencies, puts `glm`/`glmapp` on your PATH,
 # and creates a desktop shortcut for the app.
 $ErrorActionPreference = "Stop"
 $root = $PSScriptRoot
 
-Write-Host "Installing GLM Code dependencies..." -ForegroundColor Cyan
+Write-Host "Installing Make No Mistakes dependencies..." -ForegroundColor Cyan
 python -m pip install --user -r (Join-Path $root "requirements.txt")
 if ($LASTEXITCODE -ne 0) { Write-Host "pip install failed" -ForegroundColor Red; exit 1 }
 
@@ -34,21 +34,21 @@ if ($userPath -notlike "*$launcherDir*") {
 $pythonw = (Get-Command pythonw -ErrorAction SilentlyContinue).Source
 if ($pythonw) {
     $shell = New-Object -ComObject WScript.Shell
-    $lnk = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath("Desktop")) "GLM Code.lnk"))
+    $lnk = $shell.CreateShortcut((Join-Path ([Environment]::GetFolderPath("Desktop")) "Make No Mistakes.lnk"))
     $lnk.TargetPath = $pythonw
     $lnk.Arguments = "-m glmcode.gui"
     $lnk.WorkingDirectory = $root
-    $lnk.Description = "GLM Code - free AI coding agent"
+    $lnk.Description = "Make No Mistakes - free AI coding agent"
     $icoFile = Join-Path $root "glmcode\gui\app_icon.ico"
     if (Test-Path $icoFile) {
         $lnk.IconLocation = "$icoFile,0"
     }
     $lnk.Save()
-    Write-Host "Created desktop shortcut: GLM Code" -ForegroundColor Green
+    Write-Host "Created desktop shortcut: Make No Mistakes" -ForegroundColor Green
 }
 
 Write-Host ""
 Write-Host "Done! Set your free API key (from https://z.ai -> profile -> API Keys):" -ForegroundColor Green
 Write-Host "  setx ZAI_API_KEY your-key-here    (or let the app ask on first launch)"
-Write-Host "Launch the desktop app:  glmapp   (or the 'GLM Code' desktop shortcut)" -ForegroundColor Green
+Write-Host "Launch the desktop app:  glmapp   (or the 'Make No Mistakes' desktop shortcut)" -ForegroundColor Green
 Write-Host "Terminal version:        glm"
