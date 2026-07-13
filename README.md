@@ -48,6 +48,20 @@ anything destructive (unless you put it in auto mode).
    (Terminal version: `glm`. Without installing: `.\glmapp.cmd` / `.\glm.cmd`
    from this directory, or `python -m glmcode.gui` / `python -m glmcode`.)
 
+## Updating
+
+Pull the latest and you're done — the `glm`/`glmapp` launchers run the code
+straight from this folder, so code changes take effect immediately:
+
+```powershell
+cd "$HOME\Make No Mistakes"
+git pull
+```
+
+You only need to **re-run `.\install.ps1`** if you **move or rename this
+folder** (the launchers and desktop shortcut have its path baked in, so they
+break until you regenerate them) — or if `requirements.txt` changed.
+
 ## The desktop app
 
 - **Liquid glass UI** — frameless window, translucent blurred panels, macOS-style
