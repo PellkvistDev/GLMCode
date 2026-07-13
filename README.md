@@ -16,16 +16,21 @@ anything destructive (unless you put it in auto mode).
 
 ## Setup (once)
 
+> **Run every command below in PowerShell, not the old Command Prompt (cmd).**
+> The installer is a PowerShell script and won't run under cmd. Open
+> **Windows PowerShell** from the Start menu (or Windows Terminal → PowerShell
+> tab). `$HOME` below expands to your user folder, e.g. `C:\Users\<you>`.
+
 1. **Get a free API key** — sign up at [z.ai](https://z.ai) (free, no credit
    card), open your profile menu → **API Keys** → create a key.
 2. **Get the code** — clone it into a `Make No Mistakes` folder:
    ```powershell
-   cd C:\Users\theo
+   cd $HOME
    git clone https://github.com/PellkvistDev/Make-No-Mistakes.git "Make No Mistakes"
    ```
 3. **Install**:
    ```powershell
-   cd "C:\Users\theo\Make No Mistakes"
+   cd "$HOME\Make No Mistakes"
    .\install.ps1
    ```
 4. Set your API key as an environment variable (this is where Make No Mistakes reads
@@ -87,7 +92,7 @@ Just talk to it:
 Attach any image by mentioning its path, or with `/image`:
 
 ```
-> here's the bug: C:\Users\theo\Desktop\error.png what's wrong?
+> here's the bug: C:\Users\me\Desktop\error.png what's wrong?
 > /image mockup.png build this page in React
 ```
 
