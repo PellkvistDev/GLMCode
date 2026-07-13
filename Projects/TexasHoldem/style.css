@@ -1,0 +1,362 @@
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
+    color: #fff;
+    min-height: 100vh;
+    padding: 20px;
+}
+
+.app-container {
+    max-width: 1200px;
+    margin: 0 auto;
+}
+
+header {
+    text-align: center;
+    margin-bottom: 20px;
+}
+
+header h1 {
+    font-size: 2.5em;
+    margin-bottom: 15px;
+    color: #ffd700;
+    text-shadow: 2px 2px 4px rgba(0,0,0,0.5);
+}
+
+.stats-bar {
+    display: flex;
+    justify-content: center;
+    gap: 30px;
+    flex-wrap: wrap;
+}
+
+.stat-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    background: rgba(255,255,255,0.1);
+    padding: 10px 20px;
+    border-radius: 8px;
+}
+
+.stat-label {
+    font-size: 0.9em;
+    color: #aaa;
+}
+
+.stat-value {
+    font-size: 1.2em;
+    font-weight: bold;
+    color: #4ade80;
+}
+
+.game-container {
+    background: rgba(0,0,0,0.3);
+    border-radius: 20px;
+    padding: 20px;
+    margin-bottom: 20px;
+}
+
+.opponents-area {
+    display: flex;
+    justify-content: center;
+    gap: 20px;
+    margin-bottom: 20px;
+    flex-wrap: wrap;
+}
+
+.opponent {
+    background: rgba(255,255,255,0.05);
+    border-radius: 12px;
+    padding: 15px;
+    width: 200px;
+    text-align: center;
+    transition: transform 0.3s;
+}
+
+.opponent.active {
+    border: 2px solid #ffd700;
+    box-shadow: 0 0 15px rgba(255,215,0,0.5);
+}
+
+.opponent.folded {
+    opacity: 0.5;
+}
+
+.opponent-info {
+    display: flex;
+    justify-content: space-between;
+    margin-bottom: 10px;
+}
+
+.opponent-name {
+    font-weight: bold;
+    color: #aaa;
+}
+
+.opponent-stack {
+    color: #4ade80;
+}
+
+.opponent-cards {
+    display: flex;
+    justify-content: center;
+    gap: 5px;
+    min-height: 70px;
+}
+
+.opponent-status {
+    margin-top: 8px;
+    font-size: 0.85em;
+    color: #ffd700;
+}
+
+.poker-table {
+    background: radial-gradient(ellipse at center, #2d5a27 0%, #1e3d1a 100%);
+    border: 8px solid #8b4513;
+    border-radius: 150px;
+    padding: 40px;
+    margin: 20px 0;
+    position: relative;
+    box-shadow: inset 0 0 50px rgba(0,0,0,0.5), 0 10px 30px rgba(0,0,0,0.5);
+}
+
+.community-cards {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 20px;
+    min-height: 90px;
+}
+
+.pot-area {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    font-size: 1.2em;
+}
+
+.pot-label {
+    color: #ffd700;
+}
+
+.pot-amount {
+    font-size: 1.5em;
+    font-weight: bold;
+    color: #fff;
+}
+
+.current-bet {
+    text-align: center;
+    margin-top: 10px;
+    color: #aaa;
+    font-size: 0.9em;
+}
+
+.learning-cue {
+    text-align: center;
+    margin-top: 15px;
+    padding: 10px;
+    background: rgba(255,215,0,0.1);
+    border-radius: 8px;
+    border: 1px solid rgba(255,215,0,0.3);
+}
+
+.learning-cue strong {
+    color: #ffd700;
+}
+
+.player-area {
+    text-align: center;
+    padding: 20px;
+    background: rgba(0,0,0,0.2);
+    border-radius: 12px;
+}
+
+.player-cards {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 15px;
+    min-height: 90px;
+}
+
+.player-info {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 15px;
+    margin-bottom: 10px;
+}
+
+.player-name {
+    font-size: 1.2em;
+    font-weight: bold;
+}
+
+.player-stack {
+    font-size: 1.3em;
+    color: #4ade80;
+}
+
+.hand-rank {
+    font-size: 1.1em;
+    color: #aaa;
+}
+
+.controls {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 10px;
+    margin-bottom: 20px;
+}
+
+.btn {
+    padding: 12px 24px;
+    border: none;
+    border-radius: 8px;
+    font-size: 1em;
+    cursor: pointer;
+    transition: all 0.3s;
+    font-weight: bold;
+}
+
+.btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.btn-primary {
+    background: #4ade80;
+    color: #1a1a2e;
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: #22c55e;
+    transform: translateY(-2px);
+}
+
+.btn-secondary {
+    background: #6b7280;
+    color: #fff;
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background: #4b5563;
+    transform: translateY(-2px);
+}
+
+.raise-controls {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: rgba(255,255,255,0.1);
+    padding: 10px 20px;
+    border-radius: 8px;
+}
+
+.raise-controls label {
+    color: #aaa;
+}
+
+.raise-controls input {
+    width: 80px;
+    padding: 8px;
+    border-radius: 4px;
+    border: none;
+    background: rgba(255,255,255,0.2);
+    color: #fff;
+    font-size: 1em;
+}
+
+.raise-controls input:focus {
+    outline: 2px solid #ffd700;
+}
+
+.learning-panel {
+    background: rgba(0,0,0,0.3);
+    border-radius: 12px;
+    padding: 20px;
+}
+
+.learning-panel h3 {
+    color: #ffd700;
+    margin-bottom: 15px;
+    text-align: center;
+}
+
+.tips-container {
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.tip {
+    background: rgba(255,255,255,0.05);
+    padding: 12px;
+    margin-bottom: 10px;
+    border-radius: 8px;
+    border-left: 3px solid #4ade80;
+}
+
+.tip strong {
+    color: #4ade80;
+}
+
+.tip.hint {
+    border-left-color: #ffd700;
+}
+
+.tip.hint strong {
+    color: #ffd700;
+}
+
+.tip.warning {
+    border-left-color: #ef4444;
+}
+
+.tip.warning strong {
+    color: #ef4444;
+}
+
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: rgba(255,255,255,0.1);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb {
+    background: rgba(255,255,255,0.3);
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: rgba(255,255,255,0.5);
+}
+
+@media (max-width: 768px) {
+    .opponents-area {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .controls {
+        flex-direction: column;
+        align-items: center;
+    }
+
+    .raise-controls {
+        flex-direction: column;
+        gap: 5px;
+    }
+}

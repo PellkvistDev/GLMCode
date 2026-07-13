@@ -1,0 +1,6 @@
+requests>=2.31
+rich>=13.0
+prompt_toolkit>=3.0
+pywebview>=5.0
+pillow>=10.0
+duckduckgo-search>=6.0
