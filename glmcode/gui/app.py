@@ -187,7 +187,15 @@ class Api:
 
     # -- lifecycle ------------------------------------------------------- #
 
+    def log(self, msg: str):
+        """Let the page drop breadcrumbs into the startup log (see _startup_log).
+        Lets us tell a native WebView2 hang (no JS ever runs) apart from a hang
+        inside boot() (JS logged 'boot:start' but never 'boot:done')."""
+        _startup_log(f"[js] {msg}")
+        return {"ok": True}
+
     def boot(self):
+        _startup_log("[py] boot() called")
         has_key = bool(self.cfg.resolve_api_key())
         result = {
             "version": __version__,
@@ -201,6 +209,7 @@ class Api:
         if has_key:
             result["session"] = self._resume_last()
             result["sessions"] = self.list_sessions()
+        _startup_log("[py] boot() returning")
         return result
 
     def _resume_last(self):
@@ -503,18 +512,48 @@ def _show_error(title: str, message: str) -> None:
 GUI_DIR = Path(__file__).parent          # glmcode/gui/
 ICO_PATH = GUI_DIR / "app_icon.ico"     # pre-built, ships with package
 
+STARTUP_LOG = Path.home() / ".glmcode" / "startup.log"
+
+
+def _startup_log(stage: str) -> None:
+    """Append a timestamped breadcrumb so a silent startup hang is locatable.
+
+    A "not responding" freeze prints no traceback, so we can't rely on the
+    crash handler. Instead each startup stage drops a line here; whatever
+    stage is *last* in the file is where it hung. The file is truncated at
+    the start of every launch so it always reflects the most recent run.
+    """
+    try:
+        from datetime import datetime
+        STARTUP_LOG.parent.mkdir(parents=True, exist_ok=True)
+        with STARTUP_LOG.open("a", encoding="utf-8") as fh:
+            fh.write(f"{datetime.now().isoformat(timespec='seconds')}  {stage}\n")
+    except OSError:
+        pass
+
 
 def main():
+    # Fresh breadcrumb trail for this launch (see _startup_log).
+    try:
+        STARTUP_LOG.parent.mkdir(parents=True, exist_ok=True)
+        STARTUP_LOG.write_text("", encoding="utf-8")
+    except OSError:
+        pass
+    _startup_log(f"main() start  platform={sys.platform}  python={sys.version.split()[0]}")
+
     # Verify the web assets exist (common issue if files are missing)
     index = WEB_DIR / "index.html"
     if not index.is_file():
+        _startup_log(f"ABORT missing web assets: {index}")
         _show_error("GLM Code",
                     f"Missing web assets: {index}\n"
                     f"Make sure the glmcode/gui/web/ folder was extracted correctly.")
         return
 
+    _startup_log("creating Api()")
     api = Api()
 
+    _startup_log("creating window")
     window = webview.create_window(
         title="GLM Code",
         url=str(index),
@@ -531,27 +570,49 @@ def main():
 
     # Build webview.start() kwargs
     start_kwargs = dict(debug="--debug" in sys.argv)
-    # Force EdgeChromium backend — skip auto-detection which can cause
-    # "not responding" hangs during startup on some Windows installs
+
+    # Give WebView2 a stable, writable, ASCII profile directory instead of the
+    # throwaway temp profile pywebview uses in private mode. A per-launch temp
+    # profile in an odd path (non-ASCII username, OneDrive-synced folder,
+    # locked-down temp dir) is the most common cause of *intermittent*
+    # "not responding" hangs while the window comes up. A fixed folder under
+    # ~/.glmcode also lets WebView2 reuse its cache across launches.
+    try:
+        storage = Path.home() / ".glmcode" / "webview"
+        storage.mkdir(parents=True, exist_ok=True)
+        start_kwargs["storage_path"] = str(storage)
+        start_kwargs["private_mode"] = False
+    except OSError:
+        pass  # fall back to pywebview defaults if the folder can't be made
+
     if sys.platform == "win32":
+        # Force EdgeChromium backend — skip auto-detection which can cause
+        # "not responding" hangs during startup on some Windows installs.
         start_kwargs["gui"] = "edgechromium"
-        # Intermittent "not responding" hangs while the window loads are almost
-        # always WebView2's GPU process stalling on startup — common on older
-        # GPUs, VMs, remote-desktop sessions, and flaky graphics drivers. The
-        # runtime reads these flags from WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS;
-        # disabling GPU acceleration trades a little rendering smoothness for a
-        # reliable launch. setdefault() lets an advanced user override it.
+        # Disabling GPU acceleration avoids hangs when WebView2's GPU process
+        # stalls (older GPUs, VMs, remote desktop, flaky drivers). Use ONLY
+        # --disable-gpu: it falls back to software rendering. Do NOT also pass
+        # --disable-software-rasterizer, which removes that fallback and can
+        # leave the window blank. setdefault() lets a user override the flags.
         os.environ.setdefault(
-            "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS",
-            "--disable-gpu --disable-gpu-compositing --disable-software-rasterizer",
+            "WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS", "--disable-gpu",
         )
     # Set icon via start() (pywebview 5.x/6.x — icon is NOT a create_window param)
     if ICO_PATH.is_file():
         start_kwargs["icon"] = str(ICO_PATH.resolve())
 
+    _startup_log(
+        "calling webview.start  "
+        f"gui={start_kwargs.get('gui', 'auto')}  "
+        f"flags={os.environ.get('WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS', '')!r}  "
+        f"storage={start_kwargs.get('storage_path', '(default)')}"
+    )
+
     try:
         webview.start(**start_kwargs)
+        _startup_log("webview.start returned (window closed normally)")
     except Exception as e:
+        _startup_log(f"webview.start raised {type(e).__name__}: {e}")
         _show_error("GLM Code - webview failed",
                     f"{type(e).__name__}: {e}\n\n"
                     f"Make sure WebView2 is installed:\n"
