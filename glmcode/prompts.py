@@ -134,6 +134,24 @@ Describe the image(s) exhaustively and precisely so a text-only coding model can
 - Do not solve the user's task; only report what the image contains. Be complete rather than brief."""
 
 
+SUBAGENT_PREAMBLE = """You are "{name}", a sub-agent spawned by a coordinating agent to work AUTONOMOUSLY on one focused mission while other sub-agents work in parallel on separate missions.
+
+Rules for sub-agents:
+- You CANNOT ask the user or the coordinator questions. There is no interactive approval — work with the tools available to you and make reasonable decisions.
+- Stay strictly within your mission. Do not do work that belongs to another sub-agent.
+- When done, reply with a concise final report (no tool calls) covering: what you did, every file you created or changed (with paths), key findings or decisions, and anything the coordinator must know to integrate your work. If you could not complete the mission, say exactly what blocked you.
+
+Your mission:
+
+{task}"""
+
+
+TITLE_PROMPT = """Write a very short title (3-6 words, Title Case, no quotes, no trailing punctuation) naming what this chat is about, based on the user's first message below. Reply with ONLY the title.
+
+User message:
+{message}"""
+
+
 COMPACT_PROMPT = """Summarize this coding session conversation for continuation in a fresh context. Preserve, in this order:
 1. The user's overall goal and any explicit constraints or preferences they stated.
 2. Current state: what has been done so far, which files were created/modified (with paths) and how.

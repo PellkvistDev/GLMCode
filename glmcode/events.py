@@ -37,3 +37,12 @@ class AgentEvents:
 
     # -- turn lifecycle --------------------------------------------------- #
     def turn_done(self, usage, context: int = 0) -> None: ...
+
+    # -- context compaction ----------------------------------------------- #
+    def compacted(self, summary: str) -> None:
+        """The conversation was summarized; `summary` is the retained context."""
+
+    # -- sub-agents ------------------------------------------------------- #
+    def subagent(self, id: str, name: str, status: str,
+                 mission: str = "", summary: str = "") -> None:
+        """Progress for a parallel sub-agent. status: 'running' | 'done' | 'error'."""

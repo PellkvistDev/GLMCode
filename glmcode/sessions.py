@@ -114,6 +114,16 @@ class SessionStore:
 # --------------------------------------------------------------------- #
 # Transcript -> display items (for re-rendering a loaded session in the app)
 
+def _compacted_summary(text: str) -> str:
+    """Pull the retained summary out of a compaction marker message so the UI
+    can show what the conversation was compacted down to."""
+    body = text.split("]", 1)[1] if "]" in text else text
+    tail = "\n\n[Continue helping"
+    if tail in body:
+        body = body.split(tail, 1)[0]
+    return body.strip()
+
+
 def to_display(messages: list) -> list[dict]:
     items: list[dict] = []
     body = [m for m in messages if m.get("role") != "system"]
@@ -132,7 +142,7 @@ def to_display(messages: list) -> list[dict]:
             else:
                 text = c or ""
             if text.startswith("[Context was compacted"):
-                items.append({"kind": "note", "text": "Context was compacted"})
+                items.append({"kind": "compacted", "summary": _compacted_summary(text)})
                 continue
             marker = "\n\n[Image analysis:"
             if marker in text:

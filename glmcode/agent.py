@@ -14,12 +14,33 @@ from .api import ApiError, Cancelled, Usage, ZaiClient, estimate_tokens
 from .config import Config
 from .events import AgentEvents
 from .permissions import PermissionEngine
-from .prompts import COMPACT_PROMPT, VISION_ANALYSIS_PROMPT, build_system_prompt
-from .tools import TOOL_SCHEMAS, ToolError, execute_tool, get_todos
+from .prompts import (COMPACT_PROMPT, SUBAGENT_PREAMBLE, VISION_ANALYSIS_PROMPT,
+                      build_system_prompt)
+from .tools import SUBAGENT_TOOL, TOOL_SCHEMAS, ToolError, execute_tool, get_todos
+
+MAX_SUBAGENTS = 6
+
+
+def _first_line(text: str, limit: int = 280) -> str:
+    line = (text or "").strip().splitlines()[0] if (text or "").strip() else ""
+    return line[:limit]
+
+
+class _CaptureEvents(AgentEvents):
+    """Non-interactive event sink for a sub-agent: captures streamed text and,
+    by inheriting AgentEvents, auto-denies any permission prompt (so a sub-agent
+    can only do what the current mode allows without asking)."""
+
+    def __init__(self):
+        self.text = ""
+
+    def content_delta(self, text: str) -> None:
+        self.text += text
 
 
 class Agent:
-    def __init__(self, cfg: Config, client: ZaiClient, events: AgentEvents | None = None):
+    def __init__(self, cfg: Config, client: ZaiClient, events: AgentEvents | None = None,
+                 allow_subagents: bool = True):
         self.cfg = cfg
         self.client = client
         if events is None:
@@ -31,6 +52,12 @@ class Agent:
         self.session_usage = Usage()
         self.cancel = threading.Event()
         self.busy = False
+        # Sub-agents don't get the spawning tool themselves (no recursion).
+        self.allow_subagents = allow_subagents
+        self.tool_schemas = TOOL_SCHEMAS if allow_subagents else [
+            s for s in TOOL_SCHEMAS if s["function"]["name"] != SUBAGENT_TOOL
+        ]
+        self._emit_lock = threading.Lock()  # serialize sub-agent progress emits
         self.rebuild_system_prompt()
 
     # ------------------------------------------------------------------ #
@@ -171,7 +198,7 @@ class Agent:
             return self.client.chat(
                 model=model,
                 messages=self.messages,
-                tools=TOOL_SCHEMAS,
+                tools=self.tool_schemas,
                 temperature=self.cfg.temperature,
                 max_tokens=self.cfg.max_tokens,
                 thinking=self.cfg.thinking,
@@ -213,7 +240,12 @@ class Agent:
                 continue
 
             try:
-                output = execute_tool(name, args)
+                if name == SUBAGENT_TOOL:
+                    if not self.allow_subagents:
+                        raise ToolError("sub-agents cannot spawn further sub-agents")
+                    output = self._run_subagents(args.get("agents", []))
+                else:
+                    output = execute_tool(name, args)
                 self._tool_reply(tc, output, name=name, args=args)
             except ToolError as e:
                 self._tool_reply(tc, f"ERROR: {e}", error=True, name=name, args=args)
@@ -232,6 +264,76 @@ class Agent:
             "tool_call_id": tc["id"],
             "content": content,
         })
+
+    # ------------------------------------------------------------------ #
+    # Sub-agents (parallel delegation)
+
+    def _emit_subagent(self, *args, **kwargs) -> None:
+        # evaluate_js isn't safe to call from several threads at once, so
+        # serialize progress emits coming from the worker threads.
+        with self._emit_lock:
+            self.events.subagent(*args, **kwargs)
+
+    def _run_subagents(self, specs: list) -> str:
+        """Run each spec as an autonomous agent on its own thread, in parallel,
+        and return a combined report for the coordinating model."""
+        if not isinstance(specs, list) or not specs:
+            raise ToolError("spawn_agents needs a non-empty 'agents' list")
+        specs = specs[:MAX_SUBAGENTS]
+        results: list = [None] * len(specs)
+
+        def worker(i: int, spec: dict) -> None:
+            name = str(spec.get("name") or f"agent-{i + 1}").strip()[:60] or f"agent-{i + 1}"
+            task = str(spec.get("task") or "").strip()
+            aid = f"sa{i + 1}"
+            self._emit_subagent(aid, name, "running", mission=task[:280])
+            if not task:
+                results[i] = (name, "", "no task was given")
+                self._emit_subagent(aid, name, "error", summary="no task given")
+                return
+            try:
+                report = self._run_single_subagent(name, task)
+                results[i] = (name, report, None)
+                self._emit_subagent(aid, name, "done", summary=_first_line(report))
+            except Exception as e:  # keep one failure from sinking the rest
+                err = f"{type(e).__name__}: {e}"
+                results[i] = (name, "", err)
+                self._emit_subagent(aid, name, "error", summary=err[:280])
+
+        threads = []
+        for i, spec in enumerate(specs):
+            if not isinstance(spec, dict):
+                spec = {"name": f"agent-{i + 1}", "task": str(spec)}
+            t = threading.Thread(target=worker, args=(i, spec), daemon=True)
+            threads.append(t)
+            t.start()
+        for t in threads:
+            t.join()
+
+        out = [f"Ran {len(specs)} sub-agent(s) in parallel. Their reports:\n"]
+        for entry in results:
+            name, report, err = entry
+            if err:
+                out.append(f"### {name} — FAILED\n{err}\n")
+            else:
+                out.append(f"### {name}\n{report or '(no output)'}\n")
+        return "\n".join(out)
+
+    def _run_single_subagent(self, name: str, task: str) -> str:
+        """One sub-agent: a fresh Agent (own client + non-interactive sink) that
+        runs its mission to completion and returns its final report text."""
+        # A separate client per thread avoids sharing one requests.Session
+        # across concurrent requests.
+        client = ZaiClient(self.client.api_key, self.client.base_url)
+        sink = _CaptureEvents()
+        sub = Agent(self.cfg, client, events=sink, allow_subagents=False)
+        sub.run_turn({"role": "user",
+                      "content": SUBAGENT_PREAMBLE.format(name=name, task=task)})
+        for m in reversed(sub.messages):
+            if m.get("role") == "assistant" and isinstance(m.get("content"), str) \
+                    and m["content"].strip():
+                return m["content"].strip()
+        return sink.text.strip() or "(sub-agent produced no final report)"
 
     # ------------------------------------------------------------------ #
     # Context management
@@ -262,6 +364,7 @@ class Agent:
             )
         summary = result.content.strip()
         self.session_usage.add(result.usage)
+        self.events.compacted(summary)
         self.messages = [self.messages[0], {
             "role": "user",
             "content": ("[Context was compacted. Summary of the session so far:]\n\n"

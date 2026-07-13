@@ -22,6 +22,7 @@ from ..agent import Agent
 from ..api import IMAGE_EXTENSIONS, ZaiClient
 from ..config import PERMISSION_MODES, Config, load_config, save_config
 from ..events import AgentEvents
+from ..prompts import TITLE_PROMPT
 from ..sessions import SessionStore, new_id, to_display
 from ..tools import configure_search, get_todos, restore_todos
 from ..permissions import add_command_aliases
@@ -99,6 +100,15 @@ class WebEvents(AgentEvents):
                   completion_tokens=usage.completion_tokens,
                   context=context)
 
+    # context compaction --------------------------------------------------
+    def compacted(self, summary):
+        self.emit("compacted", summary=summary)
+
+    # sub-agents ----------------------------------------------------------
+    def subagent(self, id, name, status, mission="", summary=""):
+        self.emit("subagent", id=id, name=name, status=status,
+                  mission=mission, summary=summary)
+
     # permissions ------------------------------------------------------------
     def ask_permission(self, title, preview, always_label=None):
         rid = uuid.uuid4().hex
@@ -159,6 +169,7 @@ class Api:
         self.window: webview.Window | None = None
         self.store = SessionStore()
         self.session_id: str | None = None
+        self.session_title: str = ""   # AI-chosen chat name; "" until first turn
         self._client: ZaiClient | None = None
         self._turn_lock = threading.Lock()
 
@@ -228,7 +239,7 @@ class Api:
         return self._activate_session(
             sid, data.get("messages", []), data.get("cwd", ""),
             data.get("prompt_tokens", 0), data.get("completion_tokens", 0),
-            data.get("todos", []),
+            data.get("todos", []), data.get("title", ""),
         )
 
     def save_api_key(self, key: str):
@@ -334,7 +345,7 @@ class Api:
 
     def _activate_session(self, sid: str, messages: list, cwd: str,
                           prompt_tokens: int, completion_tokens: int,
-                          todos: list) -> dict:
+                          todos: list, title: str = "") -> dict:
         cwd_ok = True
         if cwd:
             try:
@@ -348,6 +359,7 @@ class Api:
         agent.set_usage(prompt_tokens, completion_tokens)
         self.agent = agent
         self.session_id = sid
+        self.session_title = title
         restore_todos(todos)
         self.cfg.last_session_id = sid
         save_config(self.cfg)
@@ -382,7 +394,7 @@ class Api:
         res = self._activate_session(
             sid, data.get("messages", []), data.get("cwd", ""),
             data.get("prompt_tokens", 0), data.get("completion_tokens", 0),
-            data.get("todos", []),
+            data.get("todos", []), data.get("title", ""),
         )
         res["sessions"] = self.list_sessions()
         return res
@@ -402,7 +414,26 @@ class Api:
         if self.agent and self.session_id:
             u = self.agent.session_usage
             self.store.save(self.session_id, str(Path.cwd()), self.agent.messages,
-                            u.prompt_tokens, u.completion_tokens, todos=get_todos())
+                            u.prompt_tokens, u.completion_tokens, todos=get_todos(),
+                            title=self.session_title)
+
+    def _generate_title(self, first_message: str) -> str:
+        """Ask the model for a short chat name from the first user message.
+        Best-effort: any failure just falls back to the derived title."""
+        client = self._ensure_client()
+        if not client or not first_message.strip():
+            return ""
+        try:
+            res = client.chat(
+                model=self.cfg.model,
+                messages=[{"role": "user",
+                           "content": TITLE_PROMPT.format(message=first_message[:2000])}],
+                tools=None, temperature=0.3, max_tokens=24, thinking=False,
+            )
+            title = " ".join((res.content or "").split()).strip().strip('"\'').rstrip(".")
+            return title[:64]
+        except Exception:
+            return ""
 
     # -- images ---------------------------------------------------------- #
 
@@ -438,10 +469,17 @@ class Api:
             else:
                 msg = {"role": "user", "content": text}
             self.agent.run_turn(msg)
+            # First turn of a fresh chat: let the model name it for the sidebar.
+            if not self.session_title and text:
+                t = self._generate_title(text)
+                if t:
+                    self.session_title = t
+            self._save_current()  # persist now so the returned sidebar is current
             u = self.agent.session_usage
             return {"ok": True, "prompt_tokens": u.prompt_tokens,
                     "completion_tokens": u.completion_tokens,
                     "context": self.agent.context_estimate(),
+                    "title": self.session_title,
                     "sessions": self.list_sessions()}
         except Exception as e:
             self.events.error(f"{type(e).__name__}: {e}")

@@ -999,7 +999,51 @@ TOOL_SCHEMAS = [
         },
         ["file_pattern"],
     ),
+    _schema(
+        "spawn_agents",
+        "Delegate work to sub-agents that run in PARALLEL, each with its own separate "
+        "mission, then collect their reports. Use this when a task splits into "
+        "independent parts that don't depend on each other's output — e.g. researching "
+        "several areas of a codebase at once, or implementing unrelated modules "
+        "simultaneously. Each sub-agent runs autonomously with the same tools as you "
+        "(except it cannot spawn further agents) and cannot ask questions, so give each "
+        "one a COMPLETE, self-contained mission with all the context it needs — it does "
+        "not see this conversation. Give sub-agents non-overlapping missions so they "
+        "don't edit the same files at once. Sub-agent capabilities follow the current "
+        "permission mode: in 'ask' mode they are effectively read-only (research), in "
+        "'auto-edit' they can also modify files, in 'full auto' they can do anything. "
+        "Do NOT use this for trivial work or tightly-coupled steps you should just do "
+        "yourself.",
+        {
+            "agents": {
+                "type": "array",
+                "description": "The sub-agents to run in parallel (1-6).",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "name": {
+                            "type": "string",
+                            "description": "Short kebab-case identifier for this "
+                                           "sub-agent, e.g. 'auth-researcher'.",
+                        },
+                        "task": {
+                            "type": "string",
+                            "description": "The complete, self-contained mission for "
+                                           "this sub-agent, including all context, file "
+                                           "paths, and constraints it needs to succeed "
+                                           "on its own.",
+                        },
+                    },
+                    "required": ["name", "task"],
+                },
+            },
+        },
+        ["agents"],
+    ),
 ]
+
+# Handled specially by the agent (needs the client/events), not via TOOL_FUNCTIONS.
+SUBAGENT_TOOL = "spawn_agents"
 
 
 TOOL_FUNCTIONS = {
