@@ -71,8 +71,12 @@ break until you regenerate them) — or if `requirements.txt` changed.
   sidebar (toggle button next to the traffic lights) lists all your chats with
   a title, project folder and last-active time, so you can jump between
   projects without losing context:
-  - **New Chat** always asks *you* to pick the project folder — nothing is
-    auto-created or defaulted for you.
+  - **New Chat** offers a choice: pick a project folder yourself, or open the
+    **whiteboard** — an always-available scratch folder for quick, throwaway
+    work, created next to this app's own install folder the first time you
+    use it (e.g. `Theo\Make No Mistakes` → `Theo\whiteboard`). Settings has a
+    **"Clear whiteboard"** button that empties it out (your chat history isn't
+    affected).
   - Clicking a past chat reopens it exactly where you left off: same folder,
     same conversation, same task list.
   - **"New chat here"** (in Settings) starts fresh in the *same* folder — the

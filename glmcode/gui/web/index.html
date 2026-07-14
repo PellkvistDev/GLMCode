@@ -65,7 +65,7 @@
     <p>Your free coding agent. It reads and edits files, runs PowerShell,
        searches the web, and understands screenshots. Each chat is tied to a
        project folder you choose, so your work and context are kept separate.</p>
-    <button id="welcome-new-chat" class="btn btn-primary welcome-cta">Choose a project folder →</button>
+    <button id="welcome-new-chat" class="btn btn-primary welcome-cta">Start a new chat →</button>
     <p class="welcome-foot">You can start as many chats as you like, one per project.</p>
   </div>
   <div id="empty-hint" class="empty-hint" hidden>
@@ -120,6 +120,20 @@
 
 <!-- Toasts -->
 <div id="toasts" aria-live="polite"></div>
+
+<!-- New chat chooser -->
+<div id="newchat-backdrop" class="backdrop" hidden>
+  <div class="sheet glass-strong" role="dialog" aria-modal="true" aria-labelledby="newchat-title">
+    <div class="sheet-head">
+      <h2 id="newchat-title">New chat</h2>
+    </div>
+    <p class="row-sub">Pick a project folder, or use the whiteboard for quick, throwaway work.</p>
+    <div class="sheet-actions">
+      <button id="newchat-whiteboard" class="btn btn-ghost">Open whiteboard</button>
+      <button id="newchat-folder" class="btn btn-primary">Open a folder…</button>
+    </div>
+  </div>
+</div>
 
 <!-- Permission sheet -->
 <div id="perm-backdrop" class="backdrop" hidden>
@@ -232,6 +246,19 @@
       </div>
       <p class="row-sub">"New chat here" starts fresh in the same project folder —
          your old conversation stays in the history sidebar.</p>
+    </section>
+
+    <section>
+      <h3>Whiteboard</h3>
+      <div class="row">
+        <div class="row-text"><label>Scratch folder</label>
+          <span class="row-sub">An always-available folder for quick, throwaway projects</span></div>
+        <div class="row-actions">
+          <button id="whiteboard-clear" class="btn btn-danger-ghost">Clear whiteboard</button>
+        </div>
+      </div>
+      <p class="row-sub">Deletes everything inside the whiteboard folder. Your chat history is
+         not affected.</p>
     </section>
 
     <p class="about">Make No Mistakes <span id="about-version"></span> — powered by z.ai's free

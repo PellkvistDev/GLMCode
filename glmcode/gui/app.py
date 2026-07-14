@@ -9,6 +9,7 @@ import mimetypes
 import os
 import queue
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -31,6 +32,10 @@ from ..permissions import add_command_aliases
 
 WEB_DIR = Path(__file__).parent / "web"
 DEFAULT_BG = WEB_DIR / "bg-default.jpg"
+# Always-available scratch folder for quick, throwaway projects -- a sibling
+# of this app's own install directory (e.g. .../Theo/Make No Mistakes ->
+# .../Theo/whiteboard), created on first use rather than at import time.
+WHITEBOARD_DIR = Path(__file__).resolve().parents[3] / "whiteboard"
 
 
 # --------------------------------------------------------------------- #
@@ -562,6 +567,33 @@ class Api:
         res = self._activate_session(new_id(), [], str(path), 0, 0, [])
         res["sessions"] = self.list_sessions()
         return res
+
+    def open_whiteboard(self):
+        """Start a brand-new chat in the always-available scratch folder,
+        creating it next to this app's own install directory if this is the
+        first time it's used. No folder picker -- unlike new_session, there's
+        nothing to choose."""
+        if self._agent and self._agent.busy:
+            return {"error": "busy"}
+        WHITEBOARD_DIR.mkdir(parents=True, exist_ok=True)
+        res = self._activate_session(new_id(), [], str(WHITEBOARD_DIR), 0, 0, [])
+        res["sessions"] = self.list_sessions()
+        return res
+
+    def clear_whiteboard(self):
+        """Delete everything inside the whiteboard folder (not the folder
+        itself, and not any chat history -- purely a filesystem reset for
+        the scratch folder's contents)."""
+        WHITEBOARD_DIR.mkdir(parents=True, exist_ok=True)
+        for child in WHITEBOARD_DIR.iterdir():
+            try:
+                if child.is_dir() and not child.is_symlink():
+                    shutil.rmtree(child, ignore_errors=True)
+                else:
+                    child.unlink(missing_ok=True)
+            except OSError:
+                pass
+        return {"ok": True}
 
     def open_session(self, sid: str):
         if self._agent and self._agent.busy:
