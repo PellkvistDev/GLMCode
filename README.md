@@ -159,7 +159,7 @@ or `n` (deny, optionally telling the model why).
 - `/compact` summarizes long conversations. The agent sees a live "context
   usage" figure every turn and can proactively compact itself at a natural
   stopping point; there's also a hard automatic fallback if context grows
-  past ~140K tokens regardless.
+  past ~155K tokens regardless.
 - `/cost` shows token usage — the price is always $0.00.
 - Non-interactive mode: `glm -p "one-shot prompt"`.
 - `Esc+Enter` inserts a newline; `Ctrl+C` interrupts the agent mid-turn.

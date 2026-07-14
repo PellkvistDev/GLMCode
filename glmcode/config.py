@@ -34,7 +34,7 @@ class Config:
     thinking: bool = True            # GLM reasoning mode
     show_reasoning: bool = True      # print the model's reasoning (dimmed)
     vision_route: str = "describe"   # describe | direct
-    context_limit_tokens: int = 140_000  # hard auto-compact fallback above this estimate
+    context_limit_tokens: int = 155_000  # hard auto-compact fallback above this estimate
     max_turns_per_request: int = 40  # safety cap on agentic iterations
     search_provider: str = "auto"    # auto | ddg | tavily
     tavily_api_key: str = ""         # optional upgrade: free key at tavily.com
