@@ -49,7 +49,7 @@ class WebEvents(AgentEvents):
         # app permanently. Leading underscore makes pywebview skip it.
         self._window: webview.Window | None = None
         self._pending: dict[str, dict] = {}
-        self.cfg = None  # set by Api.__init__ to the shared Config instance
+        self._cfg = None  # set by Api.__init__ to the shared Config instance
 
         # -- read-aloud state --------------------------------------------
         # Whether THIS turn reads assistant content aloud, snapshotted once
@@ -165,8 +165,8 @@ class WebEvents(AgentEvents):
         from .. import tts as tts_mod
         while True:
             seq, text = self._tts_queue.get()
-            voice = (self.cfg.tts_voice if self.cfg else None) or tts_mod.DEFAULT_VOICE
-            speed = (self.cfg.tts_speed if self.cfg else None) or 1.0
+            voice = (self._cfg.tts_voice if self._cfg else None) or tts_mod.DEFAULT_VOICE
+            speed = (self._cfg.tts_speed if self._cfg else None) or 1.0
             try:
                 audio, sr = tts_mod.synthesize(text, voice=voice, speed=speed)
                 wav = tts_mod.audio_to_wav_bytes(audio, sr)
@@ -289,22 +289,22 @@ class Api:
     """Methods callable from JS via window.pywebview.api.*"""
 
     def __init__(self):
-        self.cfg: Config = load_config()
-        self.events = WebEvents()
-        self.events.cfg = self.cfg  # shared reference: live settings changes apply immediately
-        self.agent: Agent | None = None
+        self._cfg: Config = load_config()
+        self._events = WebEvents()
+        self._events._cfg = self._cfg  # shared reference: live settings changes apply immediately
+        self._agent: Agent | None = None
         # Underscore-prefixed: see the comment on WebEvents._window above —
         # this class is the js_api object pywebview recursively introspects,
         # so a public `window` attribute here triggers the same infinite
         # AccessibilityObject.Bounds.Empty recursion and freezes the app.
         self._window: webview.Window | None = None
-        self.store = SessionStore()
+        self._store = SessionStore()
         self.session_id: str | None = None
         self.session_title: str = ""   # AI-chosen chat name; "" until first turn
         self._client: ZaiClient | None = None
         self._turn_lock = threading.Lock()
 
-        configure_search(self.cfg.search_provider, self.cfg.resolve_tavily_key())
+        configure_search(self._cfg.search_provider, self._cfg.resolve_tavily_key())
         # Initialize command aliases for npm/yarn/pnpm/git
         add_command_aliases({
             "npm": "npm",
@@ -314,18 +314,18 @@ class Api:
         })
 
     def _ensure_client(self) -> ZaiClient | None:
-        key = self.cfg.resolve_api_key()
+        key = self._cfg.resolve_api_key()
         if not key:
             return None
         if self._client is None:
-            self._client = ZaiClient(key, self.cfg.base_url)
+            self._client = ZaiClient(key, self._cfg.base_url)
         return self._client
 
     def _fresh_agent(self) -> Agent | None:
         client = self._ensure_client()
         if not client:
             return None
-        return Agent(self.cfg, client, events=self.events)
+        return Agent(self._cfg, client, events=self._events)
 
     # -- lifecycle ------------------------------------------------------- #
 
@@ -338,7 +338,7 @@ class Api:
 
     def boot(self):
         _startup_log("[py] boot() called")
-        has_key = bool(self.cfg.resolve_api_key())
+        has_key = bool(self._cfg.resolve_api_key())
         result = {
             "version": __version__,
             "needsKey": not has_key,
@@ -346,7 +346,7 @@ class Api:
             "settings": self._settings(),
             "sessions": self.list_sessions(),
             "session": None,
-            "contextLimit": self.cfg.context_limit_tokens,
+            "contextLimit": self._cfg.context_limit_tokens,
         }
         if has_key:
             result["session"] = self._resume_last()
@@ -356,15 +356,15 @@ class Api:
 
     def _resume_last(self):
         """Reopen the last active session on launch, if any still exists."""
-        sid = self.cfg.last_session_id
-        data = self.store.load(sid) if sid else None
+        sid = self._cfg.last_session_id
+        data = self._store.load(sid) if sid else None
         if data is None:
             sessions = self.list_sessions()
             if sessions:
                 sid = sessions[0]["id"]
-                data = self.store.load(sid)
+                data = self._store.load(sid)
         if data is None:
-            self.agent = None
+            self._agent = None
             self.session_id = None
             return None
         return self._activate_session(
@@ -404,7 +404,7 @@ class Api:
     # -- settings ---------------------------------------------------------- #
 
     def _settings(self):
-        c = self.cfg
+        c = self._cfg
         return {
             "mode": c.mode, "model": c.model, "vision_model": c.vision_model,
             "vision_route": c.vision_route, "thinking": c.thinking,
@@ -415,10 +415,10 @@ class Api:
         }
 
     def set_setting(self, key: str, value):
-        c = self.cfg
+        c = self._cfg
         if key == "mode" and value in PERMISSION_MODES:
-            if self.agent:
-                self.agent.set_mode(value)
+            if self._agent:
+                self._agent.set_mode(value)
             else:
                 c.mode = value
         elif key == "vision_route" and value in ("describe", "direct"):
@@ -427,8 +427,8 @@ class Api:
             setattr(c, key, bool(value))
         elif key in ("model", "vision_model") and isinstance(value, str) and value.strip():
             setattr(c, key, value.strip())
-            if key == "model" and self.agent:
-                self.agent.rebuild_system_prompt()
+            if key == "model" and self._agent:
+                self._agent.rebuild_system_prompt()
         elif key == "tts_voice" and isinstance(value, str) and value.strip():
             c.tts_voice = value.strip()
         elif key == "tts_speed":
@@ -468,7 +468,7 @@ class Api:
         if not cache_path.is_file():
             try:
                 tts_mod.save_wav(f"Hi, this is the {voice} voice.", cache_path,
-                                 voice=voice, status=self.events.info)
+                                 voice=voice, status=self._events.info)
             except Exception as e:
                 return {"error": str(e)}
         try:
@@ -479,7 +479,7 @@ class Api:
     # -- background ---------------------------------------------------------- #
 
     def get_background(self) -> str:
-        p = Path(self.cfg.background_path) if self.cfg.background_path else None
+        p = Path(self._cfg.background_path) if self._cfg.background_path else None
         if p and p.is_file():
             try:
                 return _data_uri(p)
@@ -498,19 +498,19 @@ class Api:
         path = Path(picked[0] if isinstance(picked, (list, tuple)) else picked)
         if not path.is_file() or path.suffix.lower() not in IMAGE_EXTENSIONS:
             return {"error": "not an image file"}
-        self.cfg.background_path = str(path)
-        save_config(self.cfg)
+        self._cfg.background_path = str(path)
+        save_config(self._cfg)
         return {"background": self.get_background()}
 
     def reset_background(self):
-        self.cfg.background_path = ""
-        save_config(self.cfg)
+        self._cfg.background_path = ""
+        save_config(self._cfg)
         return {"background": self.get_background()}
 
     # -- sessions (chat history + per-project work folder) ------------------ #
 
     def list_sessions(self):
-        return self.store.list()
+        return self._store.list()
 
     def _activate_session(self, sid: str, messages: list, cwd: str,
                           prompt_tokens: int, completion_tokens: int,
@@ -526,12 +526,12 @@ class Api:
             return {"error": "no API key configured"}
         agent.load_messages(messages)
         agent.set_usage(prompt_tokens, completion_tokens)
-        self.agent = agent
+        self._agent = agent
         self.session_id = sid
         self.session_title = title
         restore_todos(todos)
-        self.cfg.last_session_id = sid
-        save_config(self.cfg)
+        self._cfg.last_session_id = sid
+        save_config(self._cfg)
         # cwd is already switched above, so relative image/audio paths saved
         # by generate_image/show_image/speak resolve correctly here.
         items = to_display(messages)
@@ -551,7 +551,7 @@ class Api:
     def new_session(self):
         """Start a brand-new chat. The user picks the project folder themselves —
         nothing is auto-created or defaulted."""
-        if self.agent and self.agent.busy:
+        if self._agent and self._agent.busy:
             return {"error": "busy"}
         picked = self._window.create_file_dialog(webview.FOLDER_DIALOG)
         if not picked:
@@ -564,9 +564,9 @@ class Api:
         return res
 
     def open_session(self, sid: str):
-        if self.agent and self.agent.busy:
+        if self._agent and self._agent.busy:
             return {"error": "busy"}
-        data = self.store.load(sid)
+        data = self._store.load(sid)
         if not data:
             return {"error": "session not found"}
         res = self._activate_session(
@@ -578,20 +578,20 @@ class Api:
         return res
 
     def delete_session(self, sid: str):
-        self.store.delete(sid)
+        self._store.delete(sid)
         closed_active = sid == self.session_id
         if closed_active:
-            self.agent = None
+            self._agent = None
             self.session_id = None
-            if self.cfg.last_session_id == sid:
-                self.cfg.last_session_id = ""
-                save_config(self.cfg)
+            if self._cfg.last_session_id == sid:
+                self._cfg.last_session_id = ""
+                save_config(self._cfg)
         return {"ok": True, "sessions": self.list_sessions(), "closed_active": closed_active}
 
     def _save_current(self) -> None:
-        if self.agent and self.session_id:
-            u = self.agent.session_usage
-            self.store.save(self.session_id, str(Path.cwd()), self.agent.messages,
+        if self._agent and self.session_id:
+            u = self._agent.session_usage
+            self._store.save(self.session_id, str(Path.cwd()), self._agent.messages,
                             u.prompt_tokens, u.completion_tokens, todos=get_todos(),
                             title=self.session_title)
 
@@ -603,7 +603,7 @@ class Api:
             return ""
         try:
             res = client.chat(
-                model=self.cfg.model,
+                model=self._cfg.model,
                 messages=[{"role": "user",
                            "content": TITLE_PROMPT.format(message=first_message[:2000])}],
                 tools=None, temperature=0.3, max_tokens=24, thinking=False,
@@ -633,7 +633,7 @@ class Api:
     # -- chat ---------------------------------------------------------- #
 
     def send(self, text: str, image_paths: list | None = None):
-        if not self.agent or not self.session_id:
+        if not self._agent or not self.session_id:
             return {"error": "no active chat — start a New Chat first"}
         if not self._turn_lock.acquire(blocking=False):
             return {"error": "busy"}
@@ -643,47 +643,47 @@ class Api:
             if not text and not paths:
                 return {"error": "empty"}
             if paths:
-                msg = self.agent.attach_images(text, paths)
+                msg = self._agent.attach_images(text, paths)
             else:
                 msg = {"role": "user", "content": text}
             # Snapshot the read-aloud toggle for this turn only: if it's off
             # right now, TTS is never touched below, even if the user flips
             # it mid-response; if it's on, it stays on for this whole turn
             # regardless of later toggling.
-            self.events.start_turn(self.cfg.read_aloud)
-            self.agent.run_turn(msg)
+            self._events.start_turn(self._cfg.read_aloud)
+            self._agent.run_turn(msg)
             # First turn of a fresh chat: let the model name it for the sidebar.
             if not self.session_title and text:
                 t = self._generate_title(text)
                 if t:
                     self.session_title = t
             self._save_current()  # persist now so the returned sidebar is current
-            u = self.agent.session_usage
+            u = self._agent.session_usage
             return {"ok": True, "prompt_tokens": u.prompt_tokens,
                     "completion_tokens": u.completion_tokens,
-                    "context": self.agent.context_estimate(),
+                    "context": self._agent.context_estimate(),
                     "title": self.session_title,
                     "sessions": self.list_sessions()}
         except Exception as e:
-            self.events.error(f"{type(e).__name__}: {e}")
+            self._events.error(f"{type(e).__name__}: {e}")
             return {"error": str(e)}
         finally:
             self._save_current()
             self._turn_lock.release()
 
     def cancel(self):
-        if self.agent:
-            self.agent.request_cancel()
+        if self._agent:
+            self._agent.request_cancel()
         return {"ok": True}
 
     def permission_response(self, rid: str, answer: str, feedback: str = ""):
-        self.events.resolve_permission(rid, answer, feedback)
+        self._events.resolve_permission(rid, answer, feedback)
         return {"ok": True}
 
     def clear_chat(self):
         """Start a fresh chat in the same project folder; the old conversation
         stays in history (nothing is discarded)."""
-        if self.agent and self.agent.busy:
+        if self._agent and self._agent.busy:
             return {"error": "busy"}
         if not self.session_id:
             return {"error": "no active chat"}
@@ -694,23 +694,23 @@ class Api:
         return res
 
     def compact_chat(self):
-        if not self.agent or self.agent.busy:
+        if not self._agent or self._agent.busy:
             return {"error": "busy or not ready"}
         try:
-            note = self.agent.compact()
+            note = self._agent.compact()
             self._save_current()
             return {"ok": True, "note": note, "sessions": self.list_sessions(),
-                    "context": self.agent.context_estimate()}
+                    "context": self._agent.context_estimate()}
         except Exception as e:
             return {"error": str(e)}
 
     def usage(self):
-        if not self.agent:
+        if not self._agent:
             return {"prompt_tokens": 0, "completion_tokens": 0, "context": 0}
-        u = self.agent.session_usage
+        u = self._agent.session_usage
         return {"prompt_tokens": u.prompt_tokens,
                 "completion_tokens": u.completion_tokens,
-                "context": self.agent.context_estimate()}
+                "context": self._agent.context_estimate()}
 
 
 # --------------------------------------------------------------------- #
@@ -801,7 +801,7 @@ def main():
         background_color="#0a0d16",
     )
     api._window = window
-    api.events._window = window
+    api._events._window = window
 
     # Build webview.start() kwargs
     start_kwargs = dict(debug="--debug" in sys.argv)
