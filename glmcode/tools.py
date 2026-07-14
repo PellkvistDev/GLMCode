@@ -1615,10 +1615,11 @@ TOOL_SCHEMAS = [
                     "description": "Where to save the WAV (optional; auto-named under "
                                    "'generated/' in the project folder if omitted)"},
             "voice": {"type": "string",
-                     "description": "Kokoro voice name (optional; a reasonable default is "
-                                    "used if omitted or invalid)"},
+                     "description": "Kokoro voice name (optional; defaults to the user's "
+                                    "configured voice in Settings)"},
             "speed": {"type": "number",
-                     "description": "Speech speed, 0.5-2.0 (default 1.0)"},
+                     "description": "Speech speed, 0.5-2.0 (optional; defaults to the user's "
+                                    "configured speed in Settings)"},
         },
         ["text"],
     ),

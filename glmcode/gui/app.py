@@ -68,6 +68,7 @@ class WebEvents(AgentEvents):
         self._tts_queue: "queue.Queue" = queue.Queue()
         self._tts_worker_started = False
         self._tts_seq = 0
+        self._tts_first_chunk_done = False
 
     def emit(self, type_: str, **data) -> None:
         if not self._window:
@@ -109,6 +110,7 @@ class WebEvents(AgentEvents):
         """Called once per user turn (Api.send), before the agent runs."""
         self.read_aloud_this_turn = bool(read_aloud)
         self._tts_seq = 0
+        self._tts_first_chunk_done = False
         self.emit("tts_reset")
 
     def _feed_tts(self, text: str) -> None:
@@ -126,6 +128,20 @@ class WebEvents(AgentEvents):
             chunk = self._pop_ready_tts_chunk()
 
     _SENTENCE_BOUNDARY_RE = re.compile(r"[.!?](?=\s|$)")
+    # The very first chunk of a turn uses a much lower min_len than later
+    # ones -- e.g. a short opening line like "Sure!" or "Fixed." would
+    # otherwise sit in the buffer waiting for a second sentence to reach the
+    # normal 40-char floor before any audio starts at all. It can't drop to
+    # zero, though: a response that happens to *start* with a short
+    # abbreviation ("Mr. Smith says...", "vs. the old approach...") would
+    # then get flushed as its own broken one-word utterance the moment the
+    # abbreviation's period streams in, before the rest of the sentence
+    # arrives. 15 clears virtually all common title/Latin abbreviations
+    # (Mr., Dr., vs., etc., i.e., e.g., approx., Corp.) while still cutting
+    # latency well below the normal floor for anything longer. Later chunks
+    # keep the higher floor: a full-length sentence sounds more natural and
+    # is more efficient per synthesis call than many very short ones.
+    _FIRST_CHUNK_MIN_LEN = 15
 
     def _pop_ready_tts_chunk(self, min_len: int = 40, max_len: int = 400) -> str | None:
         """Pull one complete, speakable chunk off the buffer once a sentence
@@ -133,6 +149,8 @@ class WebEvents(AgentEvents):
         tiny synthesis call on their own), with a safety valve that force-
         flushes at a word break if the buffer grows too long without one
         (e.g. unusual punctuation)."""
+        if not self._tts_first_chunk_done:
+            min_len = self._FIRST_CHUNK_MIN_LEN
         buf = self._tts_buffer
         if len(buf) < min_len:
             return None
@@ -148,6 +166,7 @@ class WebEvents(AgentEvents):
                 return None
         chunk = buf[:last_boundary].strip()
         self._tts_buffer = buf[last_boundary:]
+        self._tts_first_chunk_done = True
         return chunk or None
 
     def _enqueue_tts_chunk(self, text: str) -> None:

@@ -326,13 +326,17 @@ class Agent:
         self.events.show_image(str(saved), caption=prompt)
         return self._asset_marker("image", saved, prompt, "Generated and shown to the user.")
 
-    def _speak_tool(self, text: str, path: str = "", voice: str = "", speed: float = 1.0) -> str:
-        """Generate speech locally with Kokoro and play it for the user."""
+    def _speak_tool(self, text: str, path: str = "", voice: str = "", speed: float | None = None) -> str:
+        """Generate speech locally with Kokoro and play it for the user.
+        Defaults to the user's configured Settings voice/speed (the same
+        ones the read-aloud toggle uses) unless the model explicitly asks
+        for something different."""
         from .tts import DEFAULT_VOICE, save_wav
         text = (text or "").strip()
         if not text:
             raise ToolError("speak needs a 'text'")
-        voice = (voice or "").strip() or DEFAULT_VOICE
+        voice = (voice or "").strip() or self.cfg.tts_voice or DEFAULT_VOICE
+        speed = speed if speed is not None else (self.cfg.tts_speed or 1.0)
 
         if path and path.strip():
             out_path = Path(path.strip()).expanduser()
@@ -508,7 +512,7 @@ class Agent:
                     output = self._compact_context_tool(args.get("reason", ""), assistant_idx)
                 elif name == SPEAK_TOOL:
                     output = self._speak_tool(args.get("text", ""), args.get("path", ""),
-                                              args.get("voice", ""), args.get("speed", 1.0))
+                                              args.get("voice", ""), args.get("speed"))
                 else:
                     output = execute_tool(name, args)
                 self._tool_reply(tc, output, name=name, args=args)
