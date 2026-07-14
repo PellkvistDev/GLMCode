@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .tools import (READONLY_TOOLS, FILE_WRITE_TOOLS, NETWORK_TOOLS, GIT_TOOLS,
-                    IMAGE_GEN_TOOLS, TOOL_FUNCTIONS)
+                    IMAGE_GEN_TOOLS, TTS_TOOLS, TOOL_FUNCTIONS)
 
 # Module-level command alias registry
 _COMMAND_ALIASES: dict = {}
@@ -87,6 +87,18 @@ class PermissionEngine:
             if not packages_installed():
                 preview += ("\n\n(First use: installs ~1-2GB of local ML packages and "
                            "downloads the sd-turbo model (~1.7GB), one-time. Runs fully "
+                           "offline after that.)")
+            return self._ask_generic(name, preview, asker)
+
+        if name in TTS_TOOLS:
+            if self.mode == "autoedit":
+                return Decision(True)
+            from .tts import ready as tts_ready
+            preview = (f"Text: {args.get('text', '?')}\n"
+                      f"Save to: {args.get('path') or '(auto-named under generated/)'}")
+            if not tts_ready():
+                preview += ("\n\n(First use: installs a small package (~50MB) and "
+                           "downloads the Kokoro model (~300MB), one-time. Runs fully "
                            "offline after that.)")
             return self._ask_generic(name, preview, asker)
 

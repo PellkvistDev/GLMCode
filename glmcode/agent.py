@@ -19,8 +19,8 @@ from .permissions import PermissionEngine
 from .prompts import (COMPACT_PROMPT, CONTINUE_NUDGE, SUBAGENT_PREAMBLE,
                       VIEW_IMAGE_PROMPT, VISION_ANALYSIS_PROMPT, build_system_prompt)
 from .tools import (COMPACT_CONTEXT_TOOL, GENERATE_IMAGE_TOOL, SHOW_IMAGE_TOOL,
-                    SUBAGENT_TOOL, TOOL_SCHEMAS, VIEW_IMAGE_TOOL, ToolError,
-                    execute_tool, get_todos)
+                    SPEAK_TOOL, SUBAGENT_TOOL, TOOL_SCHEMAS, VIEW_IMAGE_TOOL,
+                    ToolError, execute_tool, get_todos)
 
 MAX_SUBAGENTS = 6
 # Safety cap on auto-continue-on-truncation rounds (see _call_model_until_done).
@@ -226,11 +226,11 @@ class Agent:
         return result.strip() or "(vision model returned no description)"
 
     @staticmethod
-    def _image_marker(p: Path, caption: str, note: str) -> str:
+    def _asset_marker(kind: str, p: Path, caption: str, note: str) -> str:
         """Tool-result text carrying a machine-parseable marker so sessions.py
-        can reconstruct an inline image card when a session is reopened later
-        (see sessions.to_display / _extract_image_marker)."""
-        marker = f"[image: {Agent._display_path(p)}]"
+        can reconstruct an inline image/audio card when a session is reopened
+        later (see sessions.to_display / _extract_asset_marker)."""
+        marker = f"[{kind}: {Agent._display_path(p)}]"
         if caption:
             marker += f" [caption: {caption}]"
         return f"{marker} {note}"
@@ -241,7 +241,7 @@ class Agent:
         model or added to the text model's context."""
         p = self._resolve_existing_image(path, "show_image")
         self.events.show_image(str(p), caption=caption or "")
-        return self._image_marker(p, caption, "Displayed to the user.")
+        return self._asset_marker("image", p, caption, "Displayed to the user.")
 
     def _generate_image(self, prompt: str, path: str = "", steps: int = 1) -> str:
         """Generate an image locally with sd-turbo and show it to the user."""
@@ -265,7 +265,32 @@ class Agent:
                 raise ToolError(f"image generation failed: {e}")
 
         self.events.show_image(str(saved), caption=prompt)
-        return self._image_marker(saved, prompt, "Generated and shown to the user.")
+        return self._asset_marker("image", saved, prompt, "Generated and shown to the user.")
+
+    def _speak_tool(self, text: str, path: str = "", voice: str = "", speed: float = 1.0) -> str:
+        """Generate speech locally with Kokoro and play it for the user."""
+        from .tts import DEFAULT_VOICE, save_wav
+        text = (text or "").strip()
+        if not text:
+            raise ToolError("speak needs a 'text'")
+        voice = (voice or "").strip() or DEFAULT_VOICE
+
+        if path and path.strip():
+            out_path = Path(path.strip()).expanduser()
+            if not out_path.is_absolute():
+                out_path = Path.cwd() / out_path
+        else:
+            slug = re.sub(r"[^a-z0-9]+", "-", text.lower()).strip("-")[:40].strip("-") or "speech"
+            out_path = Path.cwd() / "generated" / f"{slug}-{uuid.uuid4().hex[:6]}.wav"
+
+        with self.events.status(f"generating speech: {text[:60]}..."):
+            try:
+                saved = save_wav(text, out_path, voice=voice, speed=speed, status=self.events.info)
+            except Exception as e:
+                raise ToolError(f"speech generation failed: {e}")
+
+        self.events.show_audio(str(saved), caption=text)
+        return self._asset_marker("audio", saved, text, "Generated and played for the user.")
 
     # ------------------------------------------------------------------ #
     # Main loop
@@ -418,6 +443,9 @@ class Agent:
                     output = self._show_image_tool(args.get("path", ""), args.get("caption", ""))
                 elif name == COMPACT_CONTEXT_TOOL:
                     output = self._compact_context_tool(args.get("reason", ""), assistant_idx)
+                elif name == SPEAK_TOOL:
+                    output = self._speak_tool(args.get("text", ""), args.get("path", ""),
+                                              args.get("voice", ""), args.get("speed", 1.0))
                 else:
                     output = execute_tool(name, args)
                 self._tool_reply(tc, output, name=name, args=args)

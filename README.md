@@ -136,6 +136,25 @@ Generated images are saved as PNGs (default: `generated/` in the project
 folder) and shown inline in the chat automatically. The agent can also show
 you any existing image file with `show_image`, without analyzing it.
 
+### Voice
+
+Two independent features, both powered by [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M)
+running **locally** — no API key, no per-use cost:
+
+- **Read replies aloud** — toggle the speaker icon in the title bar (or
+  Settings). While on, every reply is spoken as it streams in, sentence by
+  sentence; code blocks are never read aloud. The toggle is captured per
+  message: turning it on or off mid-reply never changes what's already
+  in flight, and TTS is never touched at all for a message sent while it's off.
+- **`speak` tool** — the agent can generate and play a specific piece of
+  speech on request (not for regular replies — that's the toggle above).
+  Saved as a WAV (default: `generated/`) and played automatically.
+
+Pick a voice and preview it in **Settings → Voice** (also lets you adjust
+speed). The **first** use of either feature installs a small package
+(`kokoro-onnx`) and downloads the Kokoro model (~300MB total, one-time,
+needs network access); everything after that runs fully offline.
+
 ### Permission modes
 
 | Mode | File edits | Shell commands |

@@ -13,18 +13,19 @@ from pathlib import Path
 from .config import CONFIG_DIR
 from .prompts import CONTINUE_NUDGE
 
-_IMAGE_MARKER_RE = re.compile(r"^\[image: (.*?)\](?:\s*\[caption: (.*?)\])?\s*")
+_ASSET_MARKER_RE = re.compile(r"^\[(image|audio): (.*?)\](?:\s*\[caption: (.*?)\])?\s*")
 
 
-def _extract_image_marker(text: str) -> tuple[str, str, str]:
-    """Pull the path/caption out of a generate_image/show_image tool result
-    (see agent.Agent._image_marker) so history replay can rebuild the inline
-    image card instead of showing the raw marker as tool-result text."""
-    m = _IMAGE_MARKER_RE.match(text or "")
+def _extract_asset_marker(text: str) -> tuple[str, str, str, str]:
+    """Pull the kind/path/caption out of a generate_image/show_image/speak
+    tool result (see agent.Agent._asset_marker) so history replay can
+    rebuild the inline image/audio card instead of showing the raw marker
+    as tool-result text. Returns (kind, path, caption, rest)."""
+    m = _ASSET_MARKER_RE.match(text or "")
     if not m:
-        return "", "", text or ""
-    path, caption = m.group(1), m.group(2) or ""
-    return path, caption, text[m.end():].strip()
+        return "", "", "", text or ""
+    kind, path, caption = m.group(1), m.group(2), m.group(3) or ""
+    return kind, path, caption, text[m.end():].strip()
 
 SESSIONS_DIR = CONFIG_DIR / "sessions"
 
@@ -185,9 +186,10 @@ def to_display(messages: list) -> list[dict]:
                 res = results.get(tc.get("id"), "")
                 name = fn.get("name", "?")
                 is_error = res.startswith("ERROR") or res.startswith("User denied")
-                if name in ("generate_image", "show_image") and not is_error:
-                    path, caption, clean = _extract_image_marker(res)
-                    items.append({"kind": "tool_image", "name": name, "path": path,
+                if name in ("generate_image", "show_image", "speak") and not is_error:
+                    kind, path, caption, clean = _extract_asset_marker(res)
+                    item_kind = "tool_audio" if kind == "audio" else "tool_image"
+                    items.append({"kind": item_kind, "name": name, "path": path,
                                  "caption": caption, "result": clean})
                     continue
                 items.append({

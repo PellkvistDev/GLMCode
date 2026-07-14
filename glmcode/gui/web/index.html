@@ -31,6 +31,14 @@
   </div>
   <div class="tb-right">
     <span id="usage-chip" class="chip" title="Session tokens (always free)">0 tok</span>
+    <button id="read-aloud-chip" class="icon-btn" aria-label="Read replies aloud" aria-pressed="false" title="Read replies aloud (off)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="4 9 8 9 12 5 12 19 8 15 4 15 4 9"/>
+        <path id="ra-waves" d="M16 8a5 5 0 0 1 0 8"/>
+        <line id="ra-mute" x1="16" y1="8" x2="21" y2="16" hidden/>
+        <line id="ra-mute2" x1="21" y1="8" x2="16" y2="16" hidden/>
+      </svg>
+    </button>
     <button id="mode-chip" class="chip chip-btn" title="Permission mode — click to cycle">ask</button>
     <button id="settings-btn" class="icon-btn" aria-label="Settings" title="Settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -175,6 +183,27 @@
       </div>
       <p class="row-sub">Describe: the vision model narrates images for the coding model (best code
          quality). Direct: image turns run fully on the vision model.</p>
+    </section>
+
+    <section>
+      <h3>Voice</h3>
+      <p class="row-sub">Toggle read-aloud from the speaker icon in the title bar. Runs locally
+         via Kokoro TTS — no API cost.</p>
+      <div class="row voice-row">
+        <div class="row-text"><label for="voice-select">Voice</label>
+          <span class="row-sub" id="voice-first-use-note" hidden>First use downloads ~350MB, one-time</span></div>
+        <div class="row-actions">
+          <select id="voice-select" class="voice-select"></select>
+          <button id="voice-preview-btn" class="icon-btn" aria-label="Preview voice" title="Preview voice">
+            <svg viewBox="0 0 24 24" fill="currentColor" stroke="none"><polygon points="6 4 20 12 6 20 6 4"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="row">
+        <div class="row-text"><label for="voice-speed">Speed</label>
+          <span class="row-sub" id="voice-speed-label">1.0x</span></div>
+        <input type="range" id="voice-speed" min="0.5" max="2.0" step="0.1" value="1.0" class="speed-slider">
+      </div>
     </section>
 
     <section>

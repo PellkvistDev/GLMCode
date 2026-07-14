@@ -1241,6 +1241,28 @@ TOOL_SCHEMAS = [
         },
         [],
     ),
+    _schema(
+        "speak",
+        "Generate spoken audio from text locally using Kokoro TTS (no API key or per-call "
+        "cost) and play it for the user. The FIRST call installs a small package "
+        "(~50MB) and downloads the Kokoro model (~300MB total, one-time, needs network "
+        "access); every call after that runs fully offline. Markdown/code is stripped "
+        "automatically -- write the text as you'd want it spoken. Use this when the user "
+        "asks to hear something, not for every reply (see the separate read-aloud toggle "
+        "for that).",
+        {
+            "text": {"type": "string", "description": "What to say"},
+            "path": {"type": "string",
+                    "description": "Where to save the WAV (optional; auto-named under "
+                                   "'generated/' in the project folder if omitted)"},
+            "voice": {"type": "string",
+                     "description": "Kokoro voice name (optional; a reasonable default is "
+                                    "used if omitted or invalid)"},
+            "speed": {"type": "number",
+                     "description": "Speech speed, 0.5-2.0 (default 1.0)"},
+        },
+        ["text"],
+    ),
 ]
 
 # Handled specially by the agent (needs the client/events), not via TOOL_FUNCTIONS.
@@ -1249,6 +1271,7 @@ VIEW_IMAGE_TOOL = "view_image"
 GENERATE_IMAGE_TOOL = "generate_image"
 SHOW_IMAGE_TOOL = "show_image"
 COMPACT_CONTEXT_TOOL = "compact_context"
+SPEAK_TOOL = "speak"
 
 
 TOOL_FUNCTIONS = {
@@ -1295,6 +1318,9 @@ GIT_TOOLS = {"git_push", "git_pull", "git_branch_list"}
 # packages + downloads model weights. Gated like a file-write, but with its
 # own preview since the output is binary (can't diff it like write_file).
 IMAGE_GEN_TOOLS = {"generate_image"}
+# Local text-to-speech: same shape of concern as IMAGE_GEN_TOOLS (new file,
+# first-call install/download), same gating.
+TTS_TOOLS = {"speak"}
 
 
 def execute_tool(name: str, args: dict) -> str:

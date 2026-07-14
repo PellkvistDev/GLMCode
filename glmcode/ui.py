@@ -280,3 +280,6 @@ class ConsoleEvents(AgentEvents):
 
     def show_image(self, path: str, caption: str = "") -> None:
         info(f"[image] {path}" + (f" — {caption}" if caption else ""))
+
+    def show_audio(self, path: str, caption: str = "") -> None:
+        info(f"[audio] {path}" + (f" — {caption}" if caption else ""))

@@ -50,3 +50,8 @@ class AgentEvents:
     # -- images ------------------------------------------------------------ #
     def show_image(self, path: str, caption: str = "") -> None:
         """Display an image inline for the user. No-op unless a UI is attached."""
+
+    # -- audio --------------------------------------------------------------- #
+    def show_audio(self, path: str, caption: str = "") -> None:
+        """Display a playable audio clip inline for the user. No-op unless a
+        UI is attached."""

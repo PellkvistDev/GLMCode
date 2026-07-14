@@ -7,6 +7,8 @@ import io
 import json
 import mimetypes
 import os
+import queue
+import re
 import subprocess
 import sys
 import threading
@@ -20,7 +22,7 @@ import webview
 from .. import __version__
 from ..agent import Agent
 from ..api import IMAGE_EXTENSIONS, ZaiClient
-from ..config import PERMISSION_MODES, Config, load_config, save_config
+from ..config import CONFIG_DIR, PERMISSION_MODES, Config, load_config, save_config
 from ..events import AgentEvents
 from ..prompts import TITLE_PROMPT
 from ..sessions import SessionStore, new_id, to_display
@@ -39,6 +41,20 @@ class WebEvents(AgentEvents):
     def __init__(self):
         self.window: webview.Window | None = None
         self._pending: dict[str, dict] = {}
+        self.cfg = None  # set by Api.__init__ to the shared Config instance
+
+        # -- read-aloud state --------------------------------------------
+        # Whether THIS turn reads assistant content aloud, snapshotted once
+        # by start_turn() -- toggling read_aloud mid-response never affects
+        # a turn already in flight, and never touches TTS at all if it was
+        # off when the turn started.
+        self.read_aloud_this_turn = False
+        self._tts_raw = ""        # cumulative raw text this stream segment (fence tracking)
+        self._tts_sent_len = 0    # how much of the fence-filtered prose is already buffered
+        self._tts_buffer = ""     # buffered prose not yet synthesized
+        self._tts_queue: "queue.Queue" = queue.Queue()
+        self._tts_worker_started = False
+        self._tts_seq = 0
 
     def emit(self, type_: str, **data) -> None:
         if not self.window:
@@ -57,15 +73,99 @@ class WebEvents(AgentEvents):
     # streaming ---------------------------------------------------------
     def stream_start(self):
         self.emit("stream_start")
+        self._tts_raw = ""
+        self._tts_sent_len = 0
+        self._tts_buffer = ""
 
     def reasoning_delta(self, text):
         self.emit("reasoning", text=text)
 
     def content_delta(self, text):
         self.emit("content", text=text)
+        if self.read_aloud_this_turn:
+            self._feed_tts(text)
 
     def stream_end(self):
         self.emit("stream_end")
+        if self.read_aloud_this_turn and self._tts_buffer.strip():
+            self._enqueue_tts_chunk(self._tts_buffer.strip())
+            self._tts_buffer = ""
+
+    # read-aloud ----------------------------------------------------------
+    def start_turn(self, read_aloud: bool) -> None:
+        """Called once per user turn (Api.send), before the agent runs."""
+        self.read_aloud_this_turn = bool(read_aloud)
+        self._tts_seq = 0
+        self.emit("tts_reset")
+
+    def _feed_tts(self, text: str) -> None:
+        from ..tts import strip_code_fences_incremental
+        self._tts_raw += text
+        prose = strip_code_fences_incremental(self._tts_raw)
+        new_prose = prose[self._tts_sent_len:]
+        self._tts_sent_len = len(prose)
+        if not new_prose:
+            return
+        self._tts_buffer += new_prose
+        chunk = self._pop_ready_tts_chunk()
+        while chunk:
+            self._enqueue_tts_chunk(chunk)
+            chunk = self._pop_ready_tts_chunk()
+
+    _SENTENCE_BOUNDARY_RE = re.compile(r"[.!?](?=\s|$)")
+
+    def _pop_ready_tts_chunk(self, min_len: int = 40, max_len: int = 400) -> str | None:
+        """Pull one complete, speakable chunk off the buffer once a sentence
+        boundary is reached (so short abbreviations like "Mr." don't fire a
+        tiny synthesis call on their own), with a safety valve that force-
+        flushes at a word break if the buffer grows too long without one
+        (e.g. unusual punctuation)."""
+        buf = self._tts_buffer
+        if len(buf) < min_len:
+            return None
+        last_boundary = None
+        for m in self._SENTENCE_BOUNDARY_RE.finditer(buf):
+            if m.end() >= min_len:
+                last_boundary = m.end()
+        if last_boundary is None:
+            if len(buf) >= max_len:
+                cut = buf.rfind(" ", 0, max_len)
+                last_boundary = cut if cut > 0 else max_len
+            else:
+                return None
+        chunk = buf[:last_boundary].strip()
+        self._tts_buffer = buf[last_boundary:]
+        return chunk or None
+
+    def _enqueue_tts_chunk(self, text: str) -> None:
+        if not text.strip():
+            return
+        self._ensure_tts_worker()
+        self._tts_seq += 1
+        self._tts_queue.put((self._tts_seq, text))
+
+    def _ensure_tts_worker(self) -> None:
+        if self._tts_worker_started:
+            return
+        self._tts_worker_started = True
+        threading.Thread(target=self._tts_worker_loop, daemon=True).start()
+
+    def _tts_worker_loop(self) -> None:
+        # One worker, strictly serial: chunks are emitted in the order they
+        # were enqueued, and a local model pipeline isn't meant for
+        # concurrent synthesis calls anyway (see tts._lock).
+        from .. import tts as tts_mod
+        while True:
+            seq, text = self._tts_queue.get()
+            voice = (self.cfg.tts_voice if self.cfg else None) or tts_mod.DEFAULT_VOICE
+            speed = (self.cfg.tts_speed if self.cfg else None) or 1.0
+            try:
+                audio, sr = tts_mod.synthesize(text, voice=voice, speed=speed)
+                wav = tts_mod.audio_to_wav_bytes(audio, sr)
+                src = "data:audio/wav;base64," + base64.b64encode(wav).decode("ascii")
+                self.emit("play_audio", seq=seq, src=src)
+            except Exception as e:
+                self.emit("play_audio", seq=seq, src="", error=str(e))
 
     # tools --------------------------------------------------------------
     def tool_call(self, name, args):
@@ -116,6 +216,14 @@ class WebEvents(AgentEvents):
         except Exception:
             src = ""
         self.emit("show_image", path=str(path), caption=caption or "", src=src)
+
+    # audio -------------------------------------------------------------------
+    def show_audio(self, path, caption=""):
+        try:
+            src = _data_uri(Path(path))
+        except Exception:
+            src = ""
+        self.emit("show_audio", path=str(path), caption=caption or "", src=src)
 
     # permissions ------------------------------------------------------------
     def ask_permission(self, title, preview, always_label=None):
@@ -175,6 +283,7 @@ class Api:
     def __init__(self):
         self.cfg: Config = load_config()
         self.events = WebEvents()
+        self.events.cfg = self.cfg  # shared reference: live settings changes apply immediately
         self.agent: Agent | None = None
         self.window: webview.Window | None = None
         self.store = SessionStore()
@@ -290,6 +399,7 @@ class Api:
             "show_reasoning": c.show_reasoning, "temperature": c.temperature,
             "cwd": str(Path.cwd()) if self.session_id else "",
             "background_custom": bool(c.background_path),
+            "read_aloud": c.read_aloud, "tts_voice": c.tts_voice, "tts_speed": c.tts_speed,
         }
 
     def set_setting(self, key: str, value):
@@ -301,12 +411,19 @@ class Api:
                 c.mode = value
         elif key == "vision_route" and value in ("describe", "direct"):
             c.vision_route = value
-        elif key in ("thinking", "show_reasoning"):
+        elif key in ("thinking", "show_reasoning", "read_aloud"):
             setattr(c, key, bool(value))
         elif key in ("model", "vision_model") and isinstance(value, str) and value.strip():
             setattr(c, key, value.strip())
             if key == "model" and self.agent:
                 self.agent.rebuild_system_prompt()
+        elif key == "tts_voice" and isinstance(value, str) and value.strip():
+            c.tts_voice = value.strip()
+        elif key == "tts_speed":
+            try:
+                c.tts_speed = min(2.0, max(0.5, float(value)))
+            except (TypeError, ValueError):
+                pass
         elif key == "temperature":
             try:
                 c.temperature = min(1.5, max(0.0, float(value)))
@@ -316,6 +433,36 @@ class Api:
             return {"error": f"unknown setting {key}"}
         save_config(c)
         return self._settings()
+
+    # -- text-to-speech -------------------------------------------------------- #
+
+    def tts_status(self):
+        from ..tts import ready
+        return {"ready": ready()}
+
+    def tts_voices(self):
+        from .. import tts as tts_mod
+        return {"voices": tts_mod.list_voices()}
+
+    def preview_voice(self, voice: str):
+        """Synthesize (once, then cached on disk) and return a short sample
+        of the given voice so Settings can offer an audition button. Can
+        take a while on the very first call ever (full first-use install +
+        download), same as any other first TTS use."""
+        from .. import tts as tts_mod
+        voice = (voice or "").strip() or tts_mod.DEFAULT_VOICE
+        cache_dir = CONFIG_DIR / "models" / "kokoro" / "previews"
+        cache_path = cache_dir / f"{voice}.wav"
+        if not cache_path.is_file():
+            try:
+                tts_mod.save_wav(f"Hi, this is the {voice} voice.", cache_path,
+                                 voice=voice, status=self.events.info)
+            except Exception as e:
+                return {"error": str(e)}
+        try:
+            return {"ok": True, "src": _data_uri(cache_path)}
+        except OSError as e:
+            return {"error": str(e)}
 
     # -- background ---------------------------------------------------------- #
 
@@ -373,11 +520,11 @@ class Api:
         restore_todos(todos)
         self.cfg.last_session_id = sid
         save_config(self.cfg)
-        # cwd is already switched above, so relative image paths saved by
-        # generate_image/show_image resolve correctly here.
+        # cwd is already switched above, so relative image/audio paths saved
+        # by generate_image/show_image/speak resolve correctly here.
         items = to_display(messages)
         for it in items:
-            if it.get("kind") == "tool_image" and it.get("path"):
+            if it.get("kind") in ("tool_image", "tool_audio") and it.get("path"):
                 try:
                     it["src"] = _data_uri(Path(it["path"]))
                 except OSError:
@@ -487,6 +634,11 @@ class Api:
                 msg = self.agent.attach_images(text, paths)
             else:
                 msg = {"role": "user", "content": text}
+            # Snapshot the read-aloud toggle for this turn only: if it's off
+            # right now, TTS is never touched below, even if the user flips
+            # it mid-response; if it's on, it stays on for this whole turn
+            # regardless of later toggling.
+            self.events.start_turn(self.cfg.read_aloud)
             self.agent.run_turn(msg)
             # First turn of a fresh chat: let the model name it for the sidebar.
             if not self.session_title and text:
