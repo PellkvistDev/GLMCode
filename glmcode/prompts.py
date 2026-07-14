@@ -40,6 +40,7 @@ When editing a codebase, mimic what is already there:
 # Tool usage policy
 
 - Prefer specialized tools: read_file over `Get-Content`, grep over `Select-String`, glob over `Get-ChildItem -Recurse`, edit_file over shell redirection. Reserve run_powershell for actually running programs, tests, git, and package managers.
+- Use find_references (not grep) when the question is "where is this function/class/variable defined and used" — it matches the whole identifier only, groups results by file, and flags likely definitions. Before renaming or changing the signature of anything, find_references it first to see every call site.
 - When multiple independent lookups are needed, you may call several tools in one response; they will all be executed.
 - read_file output is prefixed with line numbers ("   12 | text"). Those prefixes are NOT part of the file. When passing old_string to edit_file, strip them and use the exact file text.
 - edit_file requires old_string to match the file EXACTLY (whitespace and indentation included) and to be unique in the file. Include enough surrounding lines to make it unique, or set replace_all true.

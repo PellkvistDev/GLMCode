@@ -284,6 +284,111 @@ def grep(pattern: str, path: str = ".", glob: str = "",
 
 
 # --------------------------------------------------------------------- #
+# find_references
+
+_DEFINITION_PATTERNS = (
+    r'^(export\s+)?(default\s+)?(async\s+)?def\s+{s}\b',                 # python
+    r'^(export\s+)?(default\s+)?(async\s+)?function\s*\*?\s+{s}\b',      # js/ts
+    r'^(export\s+)?(default\s+)?(abstract\s+)?class\s+{s}\b',            # py/js/ts/java/c#
+    r'^(export\s+)?interface\s+{s}\b',                                   # ts/c#/java
+    r'^(export\s+)?type\s+{s}\b\s*=',                                    # ts type alias
+    r'^type\s+{s}\b\s*(struct|interface)\b',                             # go type struct/interface
+    r'^(pub(\([^)]*\))?\s+)?(async\s+)?fn\s+{s}\b',                      # rust
+    r'^(pub(\([^)]*\))?\s+)?(struct|enum|trait)\s+{s}\b',                # rust
+    r'^func\s*(\([^)]*\)\s*)?{s}\b',                                     # go (incl. methods)
+    r'^(public|private|protected|internal)?\s*(static\s+)?(readonly\s+)?'
+    r'(class|struct|interface|enum|record)\s+{s}\b',                     # c#/java
+    r'^(export\s+)?(const|let|var)\s+{s}\b\s*[:=]',                      # js/ts/go-style assignment
+)
+
+
+def _looks_like_definition(line: str, symbol_re: str, flags: int = 0) -> bool:
+    """Best-effort, language-agnostic heuristic for 'is this line where the
+    symbol is defined' (vs. just used). Not a real parser -- just enough
+    common patterns (Python/JS/TS/Rust/Go/Java/C#) to be a useful signal."""
+    stripped = line.strip()
+    # The language keywords in _DEFINITION_PATTERNS (class/def/fn/...) are
+    # always lowercase regardless of `flags`; only the symbol's own case
+    # sensitivity should follow the caller's case_sensitive setting.
+    return any(re.match(p.format(s=symbol_re), stripped, flags) for p in _DEFINITION_PATTERNS)
+
+
+def find_references(symbol: str, path: str = ".", glob: str = "",
+                    case_sensitive: bool = True, max_results: int = 200) -> str:
+    """Find every occurrence of an exact identifier across the codebase,
+    grouped by file, flagging lines that look like the symbol's definition."""
+    symbol = (symbol or "").strip()
+    if not symbol:
+        raise ToolErrorBase("find_references needs a 'symbol'", ErrorSeverity.ERROR)
+    root = _resolve(path)
+    max_results = max(1, min(int(max_results), 500))
+
+    flags = 0 if case_sensitive else re.IGNORECASE
+    symbol_re = re.escape(symbol)
+    rx = re.compile(rf'\b{symbol_re}\b', flags)
+
+    targets: list[Path]
+    if root.is_file():
+        targets = [root]
+    else:
+        targets = []
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if not _should_skip_dir(d)]
+            for name in filenames:
+                if glob and not fnmatch.fnmatch(name, glob):
+                    continue
+                targets.append(Path(dirpath) / name)
+            if len(targets) > 20_000:
+                break
+
+    by_file: dict[str, list[tuple[int, str, bool]]] = {}
+    total = 0
+    files_searched = 0
+    for f in targets:
+        if total >= max_results:
+            break
+        if f.suffix in (".min.js", ".map", ".lock") or _is_binary(f):
+            continue
+        files_searched += 1
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        rel = f.relative_to(root).as_posix() if root.is_dir() else f.name
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if rx.search(line):
+                is_def = _looks_like_definition(line, symbol_re, flags)
+                shown = line.strip()
+                if len(shown) > 300:
+                    shown = shown[:300] + "..."
+                by_file.setdefault(rel, []).append((lineno, shown, is_def))
+                total += 1
+                if total >= max_results:
+                    break
+
+    if not by_file:
+        return (f"No references to '{symbol}' found in {files_searched} files under {root}"
+                + (f" (glob: {glob})" if glob else ""))
+
+    def_count = sum(1 for lines in by_file.values() for *_, d in lines if d)
+    out = [
+        f"Found {total} reference{'s' if total != 1 else ''} to '{symbol}' in "
+        f"{len(by_file)} file{'s' if len(by_file) != 1 else ''}"
+        + (f" ({def_count} likely definition{'s' if def_count != 1 else ''})" if def_count else "")
+        + ":\n"
+    ]
+    for rel, lines in sorted(by_file.items(),
+                             key=lambda kv: (-sum(1 for *_, d in kv[1] if d), kv[0])):
+        out.append(f"{rel} ({len(lines)}):")
+        for lineno, shown, is_def in lines:
+            out.append(f"  {lineno}:{' [def]' if is_def else ''} {shown}")
+        out.append("")
+    if total >= max_results:
+        out.append(f"... stopped at {max_results} results; narrow the search (path/glob) for more.")
+    return _truncate("\n".join(out).rstrip())
+
+
+# --------------------------------------------------------------------- #
 # run_powershell
 
 def run_powershell(command: str, timeout_seconds: int = 120) -> str:
@@ -853,8 +958,11 @@ TOOL_SCHEMAS = [
     ),
     _schema(
         "grep",
-        "Search file CONTENTS with a regular expression. Returns 'path:line: text' matches. "
-        "Use this to find where things are defined or used.",
+        "Search file CONTENTS with a regular expression. Returns 'path:line: text' matches, "
+        "a flat list capped at max_results. For 'find every place this function/class/variable "
+        "is used across the codebase', prefer find_references instead -- it's grouped by file "
+        "and flags likely definitions. Use grep for arbitrary patterns (not just identifiers), "
+        "e.g. finding a TODO comment, an error string, or an import statement shape.",
         {
             "pattern": {"type": "string", "description": "Regular expression to search for"},
             "path": {"type": "string", "description": "File or directory to search (default: cwd)"},
@@ -863,6 +971,23 @@ TOOL_SCHEMAS = [
             "max_results": {"type": "integer", "description": "Max matching lines (default 100)"},
         },
         ["pattern"],
+    ),
+    _schema(
+        "find_references",
+        "Find every occurrence of an exact identifier (function, class, variable, etc.) across "
+        "the codebase -- e.g. 'find all references to UserService' or 'where is parseConfig "
+        "used'. Matches the whole identifier only (not as a substring of a longer name), groups "
+        "results by file, and flags lines that look like the symbol's definition (best-effort, "
+        "not a real parser). Prefer this over grep when the question is specifically 'where is "
+        "this symbol defined/used'.",
+        {
+            "symbol": {"type": "string", "description": "The exact identifier to search for"},
+            "path": {"type": "string", "description": "Root directory or file to search (default: cwd)"},
+            "glob": {"type": "string", "description": "Only search files whose NAME matches this glob, e.g. '*.ts'"},
+            "case_sensitive": {"type": "boolean", "description": "Case-sensitive search (default true)"},
+            "max_results": {"type": "integer", "description": "Max matching lines total (default 200)"},
+        },
+        ["symbol"],
     ),
     _schema(
         "run_powershell",
@@ -1118,6 +1243,7 @@ TOOL_FUNCTIONS = {
     "list_dir": list_dir,
     "glob": glob_files,
     "grep": grep,
+    "find_references": find_references,
     "run_powershell": run_powershell,
     "todo_write": todo_write,
     "fetch_url": fetch_url,
@@ -1140,7 +1266,8 @@ TOOL_FUNCTIONS = {
 # Tools that never modify anything and run without permission prompts.
 # show_image is a pure local UI side-channel (no filesystem writes, nothing
 # sent to any third party), so it's as safe as read_file.
-READONLY_TOOLS = {"read_file", "list_dir", "glob", "grep", "todo_write", "show_image"}
+READONLY_TOOLS = {"read_file", "list_dir", "glob", "grep", "find_references",
+                 "todo_write", "show_image"}
 # Tools that modify files (auto-approved in autoedit mode).
 FILE_WRITE_TOOLS = {"write_file", "edit_file", "git_commit"}
 # Network read tools (prompt in ask mode, auto-approved in autoedit/yolo).
