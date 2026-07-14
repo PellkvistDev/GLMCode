@@ -19,13 +19,15 @@ from typing import Callable, Optional
 
 MODEL_ID = "stabilityai/sd-turbo"
 # diffusers (as of 0.39.0) only declares transformers>=4.41.2 as a test/dev
-# extra -- its actual install has NO upper bound on transformers at all. An
-# unpinned install can therefore grab a brand-new transformers major version
-# diffusers was never built against, breaking at runtime (e.g. "cannot
-# import name 'Dinov2WithRegistersConfig' from 'transformers'" when
-# transformers 5.x lands alongside diffusers built for the 4.x line). Pin it
-# ourselves since diffusers doesn't.
-REQUIRED_PACKAGES = ["torch", "diffusers", "transformers<5", "accelerate", "safetensors"]
+# extra -- its actual install has NO upper bound on transformers at all, so
+# an unpinned install can grab transformers>=5, which diffusers' autoencoder
+# import isn't built against ("cannot import name 'Dinov2WithRegistersConfig'
+# from 'transformers'"). That class was ONLY added to transformers in the
+# 4.48.0 release (2025-01-10) though -- so an upper bound alone isn't enough
+# either: pip can satisfy `transformers<5` with an older 4.x release (e.g.
+# 4.47.1) that predates the class entirely, hitting the exact same import
+# error for the opposite reason. Pin both ends of the compatible window.
+REQUIRED_PACKAGES = ["torch", "diffusers", "transformers>=4.49,<5", "accelerate", "safetensors"]
 
 StatusFn = Optional[Callable[[str], None]]
 
@@ -55,8 +57,9 @@ def packages_installed() -> bool:
 def _transformers_version_ok() -> bool:
     try:
         import importlib.metadata
-        major = int(importlib.metadata.version("transformers").split(".")[0])
-        return major < 5
+        parts = importlib.metadata.version("transformers").split(".")
+        major, minor = int(parts[0]), int(parts[1])
+        return (major, minor) >= (4, 49) and major < 5
     except Exception:
         return True  # can't tell -- don't block on an unrelated parsing issue
 
