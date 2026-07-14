@@ -30,7 +30,7 @@ class Config:
     vision_model: str = DEFAULT_VISION_MODEL
     mode: str = "ask"                # ask | autoedit | yolo
     temperature: float = 0.6
-    max_tokens: int = 8192
+    max_tokens: int = 16384
     thinking: bool = True            # GLM reasoning mode
     show_reasoning: bool = True      # print the model's reasoning (dimmed)
     vision_route: str = "describe"   # describe | direct

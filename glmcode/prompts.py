@@ -168,6 +168,14 @@ User message:
 {message}"""
 
 
+CONTINUE_NUDGE = (
+    "Your previous response was cut off because it hit the output length limit. "
+    "Continue EXACTLY where you left off. Do not repeat any text you already wrote, "
+    "do not restart or summarize what you said so far, and do not add a preamble. "
+    "If you were mid-sentence, continue the sentence."
+)
+
+
 COMPACT_PROMPT = """Summarize this coding session conversation for continuation in a fresh context. Preserve, in this order:
 1. The user's overall goal and any explicit constraints or preferences they stated.
 2. Current state: what has been done so far, which files were created/modified (with paths) and how.

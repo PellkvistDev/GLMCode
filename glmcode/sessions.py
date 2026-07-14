@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import CONFIG_DIR
+from .prompts import CONTINUE_NUDGE
 
 SESSIONS_DIR = CONFIG_DIR / "sessions"
 
@@ -143,6 +144,10 @@ def to_display(messages: list) -> list[dict]:
                 text = c or ""
             if text.startswith("[Context was compacted"):
                 items.append({"kind": "compacted", "summary": _compacted_summary(text)})
+                continue
+            if text == CONTINUE_NUDGE:
+                # Internal nudge from the auto-continue-on-truncation logic
+                # (agent.py); not a real user message, so don't render it.
                 continue
             marker = "\n\n[Image analysis:"
             if marker in text:

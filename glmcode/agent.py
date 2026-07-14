@@ -14,17 +14,40 @@ from .api import ApiError, Cancelled, Usage, ZaiClient, estimate_tokens
 from .config import Config
 from .events import AgentEvents
 from .permissions import PermissionEngine
-from .prompts import (COMPACT_PROMPT, SUBAGENT_PREAMBLE, VIEW_IMAGE_PROMPT,
-                      VISION_ANALYSIS_PROMPT, build_system_prompt)
+from .prompts import (COMPACT_PROMPT, CONTINUE_NUDGE, SUBAGENT_PREAMBLE,
+                      VIEW_IMAGE_PROMPT, VISION_ANALYSIS_PROMPT, build_system_prompt)
 from .tools import (SUBAGENT_TOOL, TOOL_SCHEMAS, VIEW_IMAGE_TOOL, ToolError,
                     execute_tool, get_todos)
 
 MAX_SUBAGENTS = 6
+# Safety cap on auto-continue-on-truncation rounds (see _call_model_until_done).
+MAX_CONTINUATIONS = 3
 
 
 def _first_line(text: str, limit: int = 280) -> str:
     line = (text or "").strip().splitlines()[0] if (text or "").strip() else ""
     return line[:limit]
+
+
+def _final_report_text(messages: list) -> str:
+    """The last assistant answer in a transcript, stitched back together if
+    it was split across several messages by the auto-continuation-on-
+    truncation logic (each split segment is followed by a CONTINUE_NUDGE
+    user message, which is how we tell a split apart from a genuine earlier
+    turn)."""
+    parts: list[str] = []
+    i = len(messages) - 1
+    while i >= 0:
+        m = messages[i]
+        if m.get("role") != "assistant" or not isinstance(m.get("content"), str):
+            break
+        parts.append(m["content"])
+        if (i >= 1 and messages[i - 1].get("role") == "user"
+                and messages[i - 1].get("content") == CONTINUE_NUDGE):
+            i -= 2
+            continue
+        break
+    return "".join(reversed(parts)).strip()
 
 
 class _CaptureEvents(AgentEvents):
@@ -189,7 +212,7 @@ class Agent:
 
         for iteration in range(self.cfg.max_turns_per_request):
             try:
-                result = self._call_model(model)
+                result = self._call_model_until_done(model)
             except ApiError as e:
                 self.events.error(str(e))
                 if e.status in (401, 403):
@@ -237,6 +260,33 @@ class Agent:
             )
         finally:
             self.events.stream_end()
+
+    def _call_model_until_done(self, model: str):
+        """Like _call_model, but if the response gets cut off by the output
+        token limit before the model finishes (no tool calls emitted either),
+        automatically nudge it to continue instead of silently treating the
+        truncated fragment as a finished answer. This is what was causing
+        replies -- and sub-agent reports especially, since a verbose report
+        can easily blow past max_tokens -- to just stop with little or no
+        text."""
+        result = self._call_model(model)
+        nudges = 0
+        while (result.finish_reason == "length" and not result.tool_calls
+               and nudges < MAX_CONTINUATIONS):
+            nudges += 1
+            self.events.warn(
+                f"response hit the output limit; continuing automatically "
+                f"({nudges}/{MAX_CONTINUATIONS})..."
+            )
+            self.messages.append(result.to_message())
+            self.messages.append({"role": "user", "content": CONTINUE_NUDGE})
+            result = self._call_model(model)
+        if result.finish_reason == "length" and not result.tool_calls:
+            self.events.warn(
+                "response still hit the output limit after automatic "
+                "continuation; it may be incomplete."
+            )
+        return result
 
     # ------------------------------------------------------------------ #
 
@@ -359,6 +409,9 @@ class Agent:
         sub = Agent(self.cfg, client, events=sink, allow_subagents=False)
         sub.run_turn({"role": "user",
                       "content": SUBAGENT_PREAMBLE.format(name=name, task=task)})
+        report = _final_report_text(sub.messages)
+        if report:
+            return report
         for m in reversed(sub.messages):
             if m.get("role") == "assistant" and isinstance(m.get("content"), str) \
                     and m["content"].strip():
