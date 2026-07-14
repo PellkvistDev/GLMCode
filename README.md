@@ -136,6 +136,17 @@ Generated images are saved as PNGs (default: `generated/` in the project
 folder) and shown inline in the chat automatically. The agent can also show
 you any existing image file with `show_image`, without analyzing it.
 
+### Browser preview
+
+The agent can start a dev server itself with `run_background` (unlike
+`run_powershell`, which blocks until a command exits, this keeps running so
+it can be checked on later) and then actually look at the result with
+`preview_page`: it loads a URL in headless Chromium and takes a screenshot,
+shown inline in the chat, instead of just assuming a web UI change looks
+right because the code compiled. The **first** use installs Playwright and
+downloads Chromium (~150-300MB, one-time); every call after that runs fully
+offline aside from loading the page itself.
+
 ### Voice
 
 Two independent features, both powered by [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M)

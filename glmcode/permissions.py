@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .tools import (READONLY_TOOLS, FILE_WRITE_TOOLS, NETWORK_TOOLS, GIT_TOOLS,
-                    IMAGE_GEN_TOOLS, TTS_TOOLS, TOOL_FUNCTIONS)
+                    IMAGE_GEN_TOOLS, TTS_TOOLS, BROWSER_TOOLS, TOOL_FUNCTIONS)
 
 # Module-level command alias registry
 _COMMAND_ALIASES: dict = {}
@@ -104,6 +104,17 @@ class PermissionEngine:
                 preview += ("\n\n(First use: installs a small package (~50MB) and "
                            "downloads the Kokoro model (~300MB), one-time. Runs fully "
                            "offline after that.)")
+            return self._ask_generic(name, preview, asker)
+
+        if name in BROWSER_TOOLS:
+            if self.mode == "autoedit":
+                return Decision(True)
+            from .browser import ready as browser_ready
+            preview = f"URL: {args.get('url', '?')}"
+            if not browser_ready():
+                preview += ("\n\n(First use: installs Playwright and downloads Chromium "
+                           "(~150-300MB), one-time. Runs fully offline after that, aside "
+                           "from loading the page itself.)")
             return self._ask_generic(name, preview, asker)
 
         return self._ask_generic(name, str(args)[:500], asker)

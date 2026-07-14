@@ -1385,6 +1385,23 @@ TOOL_SCHEMAS = [
         },
         ["status_code"],
     ),
+    _schema(
+        "preview_page",
+        "Load a URL (e.g. a local dev server started with run_background) in a real headless "
+        "browser and take a screenshot, so you can actually SEE what a web page/UI looks like "
+        "instead of trusting the code compiled. Shown to the user automatically. Call "
+        "view_image on the returned path afterward if you need a detailed description of what "
+        "rendered (layout, colors, whether something is visually broken). The FIRST call "
+        "installs Playwright and downloads Chromium (~150-300MB, one-time); every call after "
+        "that runs fully offline except for loading the page itself.",
+        {
+            "url": {"type": "string", "description": "URL to load, e.g. 'http://localhost:3000'"},
+            "wait_seconds": {"type": "number",
+                             "description": "Seconds to wait after load before screenshotting, "
+                                            "for pages that render asynchronously (default 2, max 15)"},
+        },
+        ["url"],
+    ),
     # Git tools
     _schema(
         "git_status",
@@ -1615,6 +1632,7 @@ SHOW_IMAGE_TOOL = "show_image"
 COMPACT_CONTEXT_TOOL = "compact_context"
 SPEAK_TOOL = "speak"
 SHOW_HTTP_CAT_TOOL = "show_http_cat"
+PREVIEW_PAGE_TOOL = "preview_page"
 
 
 TOOL_FUNCTIONS = {
@@ -1675,6 +1693,10 @@ IMAGE_GEN_TOOLS = {"generate_image"}
 # Local text-to-speech: same shape of concern as IMAGE_GEN_TOOLS (new file,
 # first-call install/download), same gating.
 TTS_TOOLS = {"speak"}
+# Local browser screenshots: same shape of concern as IMAGE_GEN_TOOLS/TTS_TOOLS
+# (new file, first-call install/download of Playwright + Chromium), plus it
+# also loads a URL like fetch_url does.
+BROWSER_TOOLS = {"preview_page"}
 
 
 def execute_tool(name: str, args: dict) -> str:

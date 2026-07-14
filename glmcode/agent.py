@@ -18,9 +18,9 @@ from .events import AgentEvents
 from .permissions import PermissionEngine
 from .prompts import (COMPACT_PROMPT, CONTINUE_NUDGE, SUBAGENT_PREAMBLE,
                       VIEW_IMAGE_PROMPT, VISION_ANALYSIS_PROMPT, build_system_prompt)
-from .tools import (COMPACT_CONTEXT_TOOL, GENERATE_IMAGE_TOOL, SHOW_HTTP_CAT_TOOL,
-                    SHOW_IMAGE_TOOL, SPEAK_TOOL, SUBAGENT_TOOL, TOOL_SCHEMAS,
-                    VIEW_IMAGE_TOOL, ToolError, execute_tool, get_todos)
+from .tools import (COMPACT_CONTEXT_TOOL, GENERATE_IMAGE_TOOL, PREVIEW_PAGE_TOOL,
+                    SHOW_HTTP_CAT_TOOL, SHOW_IMAGE_TOOL, SPEAK_TOOL, SUBAGENT_TOOL,
+                    TOOL_SCHEMAS, VIEW_IMAGE_TOOL, ToolError, execute_tool, get_todos)
 
 MAX_SUBAGENTS = 6
 # Safety cap on auto-continue-on-truncation rounds (see _call_model_until_done).
@@ -257,6 +257,28 @@ class Agent:
         self.events.show_image(str(saved), caption=caption)
         return self._asset_marker("image", saved, caption, "Displayed to the user.")
 
+    def _preview_page_tool(self, url: str, wait_seconds: float = 2.0) -> str:
+        """Screenshot a URL (e.g. a local dev server) with headless Chromium."""
+        from .browser import preview_page
+        url = (url or "").strip()
+        if not url:
+            raise ToolError("preview_page needs a 'url'")
+        slug = re.sub(r"[^a-z0-9]+", "-", url.lower()).strip("-")[:40].strip("-") or "page"
+        out_path = Path.cwd() / "generated" / f"preview-{slug}-{uuid.uuid4().hex[:6]}.png"
+
+        with self.events.status(f"loading {url} in a headless browser..."):
+            try:
+                saved = preview_page(url, out_path, wait_seconds=wait_seconds, status=self.events.info)
+            except Exception as e:
+                raise ToolError(f"page preview failed: {e}")
+
+        self.events.show_image(str(saved), caption=url)
+        return self._asset_marker(
+            "image", saved, url,
+            "Screenshot captured and shown to the user. Call view_image on this path if "
+            "you need a detailed description of what rendered."
+        )
+
     def _generate_image(self, prompt: str, path: str = "", steps: int = 1) -> str:
         """Generate an image locally with sd-turbo and show it to the user."""
         from .imagegen import generate_image
@@ -457,6 +479,8 @@ class Agent:
                     output = self._show_image_tool(args.get("path", ""), args.get("caption", ""))
                 elif name == SHOW_HTTP_CAT_TOOL:
                     output = self._show_http_cat_tool(args.get("status_code", 0))
+                elif name == PREVIEW_PAGE_TOOL:
+                    output = self._preview_page_tool(args.get("url", ""), args.get("wait_seconds", 2.0))
                 elif name == COMPACT_CONTEXT_TOOL:
                     output = self._compact_context_tool(args.get("reason", ""), assistant_idx)
                 elif name == SPEAK_TOOL:
