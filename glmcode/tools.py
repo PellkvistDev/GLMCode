@@ -18,6 +18,7 @@ import subprocess
 import sys
 import threading
 import time
+import urllib.parse
 import urllib.request
 from html.parser import HTMLParser
 from pathlib import Path
@@ -776,6 +777,126 @@ def web_search(query: str, max_results: int = 8) -> str:
 
 
 # --------------------------------------------------------------------- #
+# package_info -- PyPI / npm registry lookups (free, no key, no rate limit)
+
+def _pypi_package_info(name: str) -> str:
+    url = f"https://pypi.org/pypi/{urllib.parse.quote(name)}/json"
+    try:
+        r = requests.get(url, timeout=10)
+    except requests.RequestException as e:
+        raise ToolErrorBase(f"Failed to reach PyPI: {e}", ErrorSeverity.ERROR)
+    if r.status_code == 404:
+        raise ToolErrorBase(f"No PyPI package named '{name}'.", ErrorSeverity.ERROR)
+    if r.status_code != 200:
+        raise ToolErrorBase(f"PyPI returned {r.status_code} for '{name}'.", ErrorSeverity.ERROR)
+    data = r.json()
+    info = data.get("info", {})
+    requires = info.get("requires_dist") or []
+    releases = sorted(data.get("releases", {}).keys())
+    lines = [
+        f"{info.get('name', name)} {info.get('version', '?')} (PyPI)",
+        info.get("summary") or "(no summary)",
+        f"Homepage: {info.get('project_url') or info.get('home_page') or '(none)'}",
+        f"License: {info.get('license') or '(unspecified)'}",
+        f"Requires Python: {info.get('requires_python') or '(unspecified)'}",
+    ]
+    if requires:
+        lines.append(f"Dependencies ({len(requires)}):")
+        lines.extend(f"  - {d}" for d in requires[:30])
+        if len(requires) > 30:
+            lines.append(f"  ... and {len(requires) - 30} more")
+    if releases:
+        lines.append(f"{len(releases)} releases published; most recent: {', '.join(releases[-5:])}")
+    return _truncate("\n".join(lines))
+
+
+def _npm_package_info(name: str) -> str:
+    # Scoped packages (@scope/name) need the slash percent-encoded per the
+    # registry API's convention for GET-by-name requests.
+    url = f"https://registry.npmjs.org/{urllib.parse.quote(name, safe='')}"
+    try:
+        r = requests.get(url, timeout=10)
+    except requests.RequestException as e:
+        raise ToolErrorBase(f"Failed to reach the npm registry: {e}", ErrorSeverity.ERROR)
+    if r.status_code == 404:
+        raise ToolErrorBase(f"No npm package named '{name}'.", ErrorSeverity.ERROR)
+    if r.status_code != 200:
+        raise ToolErrorBase(f"npm registry returned {r.status_code} for '{name}'.", ErrorSeverity.ERROR)
+    data = r.json()
+    versions = data.get("versions", {})
+    latest_tag = (data.get("dist-tags") or {}).get("latest", "?")
+    latest = versions.get(latest_tag, {})
+    deps = latest.get("dependencies") or {}
+    lines = [
+        f"{data.get('name', name)} {latest_tag} (npm)",
+        data.get("description") or "(no description)",
+        f"Homepage: {latest.get('homepage') or '(none)'}",
+        f"License: {latest.get('license') or '(unspecified)'}",
+    ]
+    if deps:
+        lines.append(f"Dependencies ({len(deps)}):")
+        lines.extend(f"  - {k}@{v}" for k, v in list(deps.items())[:30])
+        if len(deps) > 30:
+            lines.append(f"  ... and {len(deps) - 30} more")
+    if versions:
+        lines.append(f"{len(versions)} versions published")
+    return _truncate("\n".join(lines))
+
+
+def package_info(ecosystem: str, name: str) -> str:
+    ecosystem = (ecosystem or "").strip().lower()
+    name = (name or "").strip()
+    if not name:
+        raise ToolErrorBase("package_info needs a 'name'.", ErrorSeverity.ERROR)
+    if ecosystem in ("pypi", "python", "pip"):
+        return _pypi_package_info(name)
+    if ecosystem in ("npm", "node", "js", "javascript", "typescript"):
+        return _npm_package_info(name)
+    raise ToolErrorBase(f"Unknown ecosystem '{ecosystem}'. Use 'pypi' or 'npm'.", ErrorSeverity.ERROR)
+
+
+# --------------------------------------------------------------------- #
+# http.cat -- a cat image for any HTTP status code (free, no key)
+
+_HTTP_CAT_CODES = {
+    0, 100, 101, 102, 103, 200, 201, 202, 203, 204, 205, 206, 207, 208, 214, 226,
+    300, 301, 302, 303, 304, 305, 307, 308,
+    400, 401, 402, 403, 404, 405, 406, 407, 408, 409, 410, 411, 412, 413, 414,
+    415, 416, 417, 418, 419, 420, 421, 422, 423, 424, 425, 426, 428, 429, 431, 444,
+    450, 451, 495, 496, 497, 498, 499,
+    500, 501, 502, 503, 504, 506, 507, 508, 509, 510, 511, 521, 522, 523, 525, 530, 599,
+}
+
+
+def fetch_http_cat(status_code: int, out_path: Path) -> Path:
+    code = int(status_code)
+    if code not in _HTTP_CAT_CODES:
+        raise ToolErrorBase(
+            f"No http.cat image for status code {code}. Known codes include "
+            f"{', '.join(str(c) for c in sorted(_HTTP_CAT_CODES) if 400 <= c < 600)[:200]}...",
+            ErrorSeverity.ERROR,
+        )
+    try:
+        r = requests.get(f"https://http.cat/images/{code}.jpg", timeout=10)
+        if r.status_code != 200 or not r.headers.get("Content-Type", "").startswith("image/"):
+            # Fall back to the bare-code URL in case the site's asset path changes.
+            r = requests.get(f"https://http.cat/{code}", timeout=10)
+    except requests.RequestException as e:
+        raise ToolErrorBase(f"Failed to reach http.cat: {e}", ErrorSeverity.ERROR)
+    content_type = r.headers.get("Content-Type", "")
+    if r.status_code != 200 or not content_type.startswith("image/"):
+        raise ToolErrorBase(f"http.cat did not return an image for {code} "
+                            f"(status {r.status_code}, content-type {content_type or '?'}).",
+                            ErrorSeverity.ERROR)
+    ext = {"image/jpeg": ".jpg", "image/png": ".png", "image/webp": ".webp"}.get(
+        content_type.split(";")[0].strip(), ".jpg")
+    out_path = out_path.with_suffix(ext)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_bytes(r.content)
+    return out_path
+
+
+# --------------------------------------------------------------------- #
 # Git tools
 
 def git_status(path: str = ".") -> str:
@@ -1242,6 +1363,28 @@ TOOL_SCHEMAS = [
         },
         ["url"],
     ),
+    _schema(
+        "package_info",
+        "Look up a package's real metadata on PyPI or npm: latest version, description, "
+        "license, and dependencies. Use this instead of guessing or web_search whenever you "
+        "need to know a package's current version or actual dependencies before using it -- "
+        "it's a direct registry lookup, faster and more reliable than scraping a page.",
+        {
+            "ecosystem": {"type": "string", "description": "'pypi' or 'npm'"},
+            "name": {"type": "string", "description": "Package name, e.g. 'requests' or '@babel/core'"},
+        },
+        ["ecosystem", "name"],
+    ),
+    _schema(
+        "show_http_cat",
+        "Fun aside, not for regular use: show the user the http.cat image for an HTTP status "
+        "code (a cat picture illustrating that status) -- e.g. when explaining a 404 or 500 "
+        "error. Downloads from the free http.cat API and displays it inline in the chat.",
+        {
+            "status_code": {"type": "integer", "description": "The HTTP status code, e.g. 404"},
+        },
+        ["status_code"],
+    ),
     # Git tools
     _schema(
         "git_status",
@@ -1471,6 +1614,7 @@ GENERATE_IMAGE_TOOL = "generate_image"
 SHOW_IMAGE_TOOL = "show_image"
 COMPACT_CONTEXT_TOOL = "compact_context"
 SPEAK_TOOL = "speak"
+SHOW_HTTP_CAT_TOOL = "show_http_cat"
 
 
 TOOL_FUNCTIONS = {
@@ -1489,6 +1633,7 @@ TOOL_FUNCTIONS = {
     "todo_write": todo_write,
     "fetch_url": fetch_url,
     "web_search": web_search,
+    "package_info": package_info,
     # Git tools
     "git_status": git_status,
     "git_branch": git_branch,
@@ -1517,8 +1662,10 @@ READONLY_TOOLS = {"read_file", "list_dir", "glob", "grep", "find_references",
 FILE_WRITE_TOOLS = {"write_file", "edit_file", "git_commit"}
 # Network read tools (prompt in ask mode, auto-approved in autoedit/yolo).
 # view_image sends the image's bytes to the vision model, so it's gated the
-# same way even though it "just reads" a local file.
-NETWORK_TOOLS = {"fetch_url", "web_search", "view_image"}
+# same way even though it "just reads" a local file. package_info/
+# show_http_cat are outbound requests to third-party APIs, same tier as
+# fetch_url.
+NETWORK_TOOLS = {"fetch_url", "web_search", "view_image", "package_info", "show_http_cat"}
 # Git tools (prompt in ask mode, auto-approved in autoedit/yolo).
 GIT_TOOLS = {"git_push", "git_pull", "git_branch_list"}
 # Local image generation: creates a new file, and the first call installs

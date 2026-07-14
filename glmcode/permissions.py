@@ -69,6 +69,10 @@ class PermissionEngine:
                 detail = f"Send image to the vision model: {args.get('path', '?')}"
                 if args.get("question"):
                     detail += f"\nFocus: {args['question']}"
+            elif name == "package_info":
+                detail = f"Look up {args.get('ecosystem', '?')} package: {args.get('name', '?')}"
+            elif name == "show_http_cat":
+                detail = f"Show http.cat image for status {args.get('status_code', '?')}"
             else:
                 detail = str(args)[:500]
             return self._ask_generic(name, detail, asker)

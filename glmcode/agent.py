@@ -18,9 +18,9 @@ from .events import AgentEvents
 from .permissions import PermissionEngine
 from .prompts import (COMPACT_PROMPT, CONTINUE_NUDGE, SUBAGENT_PREAMBLE,
                       VIEW_IMAGE_PROMPT, VISION_ANALYSIS_PROMPT, build_system_prompt)
-from .tools import (COMPACT_CONTEXT_TOOL, GENERATE_IMAGE_TOOL, SHOW_IMAGE_TOOL,
-                    SPEAK_TOOL, SUBAGENT_TOOL, TOOL_SCHEMAS, VIEW_IMAGE_TOOL,
-                    ToolError, execute_tool, get_todos)
+from .tools import (COMPACT_CONTEXT_TOOL, GENERATE_IMAGE_TOOL, SHOW_HTTP_CAT_TOOL,
+                    SHOW_IMAGE_TOOL, SPEAK_TOOL, SUBAGENT_TOOL, TOOL_SCHEMAS,
+                    VIEW_IMAGE_TOOL, ToolError, execute_tool, get_todos)
 
 MAX_SUBAGENTS = 6
 # Safety cap on auto-continue-on-truncation rounds (see _call_model_until_done).
@@ -243,6 +243,20 @@ class Agent:
         self.events.show_image(str(p), caption=caption or "")
         return self._asset_marker("image", p, caption, "Displayed to the user.")
 
+    def _show_http_cat_tool(self, status_code: int) -> str:
+        """Fetch and show the http.cat image for an HTTP status code."""
+        from .tools import fetch_http_cat
+        out_path = Path.cwd() / "generated" / f"http-cat-{int(status_code)}-{uuid.uuid4().hex[:6]}"
+        try:
+            saved = fetch_http_cat(int(status_code), out_path)
+        except ToolError:
+            raise
+        except Exception as e:
+            raise ToolError(f"could not fetch http.cat image: {e}")
+        caption = f"HTTP {status_code}"
+        self.events.show_image(str(saved), caption=caption)
+        return self._asset_marker("image", saved, caption, "Displayed to the user.")
+
     def _generate_image(self, prompt: str, path: str = "", steps: int = 1) -> str:
         """Generate an image locally with sd-turbo and show it to the user."""
         from .imagegen import generate_image
@@ -441,6 +455,8 @@ class Agent:
                                                   args.get("steps", 1))
                 elif name == SHOW_IMAGE_TOOL:
                     output = self._show_image_tool(args.get("path", ""), args.get("caption", ""))
+                elif name == SHOW_HTTP_CAT_TOOL:
+                    output = self._show_http_cat_tool(args.get("status_code", 0))
                 elif name == COMPACT_CONTEXT_TOOL:
                     output = self._compact_context_tool(args.get("reason", ""), assistant_idx)
                 elif name == SPEAK_TOOL:
