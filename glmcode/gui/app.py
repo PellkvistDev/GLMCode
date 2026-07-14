@@ -806,19 +806,13 @@ def main():
     # Build webview.start() kwargs
     start_kwargs = dict(debug="--debug" in sys.argv)
 
-    # Give WebView2 a stable, writable, ASCII profile directory instead of the
-    # throwaway temp profile pywebview uses in private mode. A per-launch temp
-    # profile in an odd path (non-ASCII username, OneDrive-synced folder,
-    # locked-down temp dir) is the most common cause of *intermittent*
-    # "not responding" hangs while the window comes up. A fixed folder under
-    # ~/.glmcode also lets WebView2 reuse its cache across launches.
-    try:
-        storage = Path.home() / ".glmcode" / "webview"
-        storage.mkdir(parents=True, exist_ok=True)
-        start_kwargs["storage_path"] = str(storage)
-        start_kwargs["private_mode"] = False
-    except OSError:
-        pass  # fall back to pywebview defaults if the folder can't be made
+    # Deliberately NOT setting a persistent storage_path: a WebView2 profile
+    # that survives across launches can keep serving stale cached copies of
+    # index.html/app.js/style.css from before a code update, causing DOM/JS
+    # version-skew (e.g. app.js referencing an element index.html hasn't
+    # added yet), which throws and can silently kill this app's boot
+    # sequence with no visible error. The default per-launch temp profile
+    # avoids that entirely at the cost of not reusing WebView2's cache.
 
     if sys.platform == "win32":
         # Force EdgeChromium backend — skip auto-detection which can cause
