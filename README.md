@@ -156,8 +156,10 @@ or `n` (deny, optionally telling the model why).
 - `/init` explores your project and writes a `GLM.md` memory file that is
   auto-loaded into the system prompt in future sessions (it also honors an
   existing `AGENTS.md` or `CLAUDE.md`).
-- `/compact` summarizes long conversations; this also happens automatically
-  when the context grows past ~110K tokens.
+- `/compact` summarizes long conversations. The agent sees a live "context
+  usage" figure every turn and can proactively compact itself at a natural
+  stopping point; there's also a hard automatic fallback if context grows
+  past ~140K tokens regardless.
 - `/cost` shows token usage — the price is always $0.00.
 - Non-interactive mode: `glm -p "one-shot prompt"`.
 - `Esc+Enter` inserts a newline; `Ctrl+C` interrupts the agent mid-turn.

@@ -18,8 +18,9 @@ from .events import AgentEvents
 from .permissions import PermissionEngine
 from .prompts import (COMPACT_PROMPT, CONTINUE_NUDGE, SUBAGENT_PREAMBLE,
                       VIEW_IMAGE_PROMPT, VISION_ANALYSIS_PROMPT, build_system_prompt)
-from .tools import (GENERATE_IMAGE_TOOL, SHOW_IMAGE_TOOL, SUBAGENT_TOOL,
-                    TOOL_SCHEMAS, VIEW_IMAGE_TOOL, ToolError, execute_tool, get_todos)
+from .tools import (COMPACT_CONTEXT_TOOL, GENERATE_IMAGE_TOOL, SHOW_IMAGE_TOOL,
+                    SUBAGENT_TOOL, TOOL_SCHEMAS, VIEW_IMAGE_TOOL, ToolError,
+                    execute_tool, get_todos)
 
 MAX_SUBAGENTS = 6
 # Safety cap on auto-continue-on-truncation rounds (see _call_model_until_done).
@@ -89,12 +90,31 @@ class Agent:
     # ------------------------------------------------------------------ #
 
     def rebuild_system_prompt(self) -> None:
-        sys_msg = {"role": "system",
-                   "content": build_system_prompt(Path.cwd(), self.cfg.model)}
+        # Cached separately from the live message so refreshing the context-
+        # usage note (see _refresh_context_note) doesn't need to re-run
+        # build_system_prompt's git subprocess calls on every model call.
+        self._base_system_prompt = build_system_prompt(Path.cwd(), self.cfg.model)
+        sys_msg = {"role": "system", "content": self._with_usage_note(self._base_system_prompt)}
         if self.messages and self.messages[0].get("role") == "system":
             self.messages[0] = sys_msg
         else:
             self.messages.insert(0, sys_msg)
+
+    def _with_usage_note(self, base: str) -> str:
+        est = estimate_tokens(self.messages) if self.messages else 0
+        limit = self.cfg.context_limit_tokens
+        return (
+            f"{base}\n\n# Context usage\n"
+            f"Estimated ~{est:,} of {limit:,} tokens used (rough estimate; auto-compact "
+            f"triggers automatically above this if you don't act first). See the "
+            f"compact_context tool in Tool usage policy."
+        )
+
+    def _refresh_context_note(self) -> None:
+        """Cheap per-call refresh of just the usage note (no subprocess calls),
+        so the model always sees an accurate, current figure."""
+        if self.messages and self.messages[0].get("role") == "system":
+            self.messages[0]["content"] = self._with_usage_note(self._base_system_prompt)
 
     def set_mode(self, mode: str) -> None:
         self.cfg.mode = mode
@@ -303,6 +323,7 @@ class Agent:
                          "steps; say 'continue' to let it keep going")
 
     def _call_model(self, model: str):
+        self._refresh_context_note()
         self.events.stream_start()
         try:
             return self.client.chat(
@@ -350,6 +371,13 @@ class Agent:
     # ------------------------------------------------------------------ #
 
     def _handle_tool_calls(self, tool_calls: list) -> None:
+        # Index of the assistant turn these tool_calls belong to. Captured
+        # once, up front: it's unambiguously self.messages[-1] right now
+        # (nothing else has been appended yet), but compact_context (if
+        # called mid-batch) needs the ORIGINAL position, not whatever
+        # self.messages[-1] happens to be after earlier tool replies in this
+        # same batch have already been appended.
+        assistant_idx = len(self.messages) - 1
         for tc in tool_calls:
             if self.cancel.is_set():
                 raise Cancelled()
@@ -388,6 +416,8 @@ class Agent:
                                                   args.get("steps", 1))
                 elif name == SHOW_IMAGE_TOOL:
                     output = self._show_image_tool(args.get("path", ""), args.get("caption", ""))
+                elif name == COMPACT_CONTEXT_TOOL:
+                    output = self._compact_context_tool(args.get("reason", ""), assistant_idx)
                 else:
                     output = execute_tool(name, args)
                 self._tool_reply(tc, output, name=name, args=args)
@@ -522,3 +552,21 @@ class Agent:
             "content": "Understood — I have the session summary and will continue from there.",
         }]
         return f"Compacted to ~{self.context_estimate():,} tokens."
+
+    def _compact_context_tool(self, reason: str, assistant_idx: int) -> str:
+        """The model's own compact_context tool call. Runs mid-turn, while
+        self.messages[assistant_idx] is the assistant turn currently being
+        processed (it has pending tool_calls of its own, possibly including
+        earlier ones in this same batch whose replies are already appended
+        after it). compact() would otherwise wipe that in-flight turn along
+        with everything else -- instead, summarize everything BEFORE it, then
+        reattach it (and any sibling tool replies already appended for this
+        batch) on top of the fresh summary, so the conversation stays valid
+        for whatever tool replies get appended after this one returns."""
+        if assistant_idx < 4:
+            return "Nothing to compact yet."
+        in_flight = self.messages[assistant_idx:]
+        self.messages = self.messages[:assistant_idx]
+        note = self.compact()
+        self.messages.extend(in_flight)
+        return note + (f" (reason: {reason})" if reason else "")

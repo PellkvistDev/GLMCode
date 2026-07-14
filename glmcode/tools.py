@@ -1227,6 +1227,20 @@ TOOL_SCHEMAS = [
         },
         ["path"],
     ),
+    _schema(
+        "compact_context",
+        "Proactively summarize the conversation so far and continue from that summary, "
+        "freeing up context space. Check the \"Context usage\" note in the system prompt "
+        "(it updates every turn) and call this yourself at a natural stopping point -- a "
+        "task just finished, or you're about to start a large new phase -- when usage is "
+        "getting close to the limit, instead of waiting for it to trigger automatically "
+        "mid-task. Not needed for short conversations.",
+        {
+            "reason": {"type": "string",
+                      "description": "Optional short note on why you're compacting now"},
+        },
+        [],
+    ),
 ]
 
 # Handled specially by the agent (needs the client/events), not via TOOL_FUNCTIONS.
@@ -1234,6 +1248,7 @@ SUBAGENT_TOOL = "spawn_agents"
 VIEW_IMAGE_TOOL = "view_image"
 GENERATE_IMAGE_TOOL = "generate_image"
 SHOW_IMAGE_TOOL = "show_image"
+COMPACT_CONTEXT_TOOL = "compact_context"
 
 
 TOOL_FUNCTIONS = {
@@ -1267,7 +1282,7 @@ TOOL_FUNCTIONS = {
 # show_image is a pure local UI side-channel (no filesystem writes, nothing
 # sent to any third party), so it's as safe as read_file.
 READONLY_TOOLS = {"read_file", "list_dir", "glob", "grep", "find_references",
-                 "todo_write", "show_image"}
+                 "todo_write", "show_image", "compact_context"}
 # Tools that modify files (auto-approved in autoedit mode).
 FILE_WRITE_TOOLS = {"write_file", "edit_file", "git_commit"}
 # Network read tools (prompt in ask mode, auto-approved in autoedit/yolo).
