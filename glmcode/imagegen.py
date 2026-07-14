@@ -18,7 +18,14 @@ from pathlib import Path
 from typing import Callable, Optional
 
 MODEL_ID = "stabilityai/sd-turbo"
-REQUIRED_PACKAGES = ["torch", "diffusers", "transformers", "accelerate", "safetensors"]
+# diffusers (as of 0.39.0) only declares transformers>=4.41.2 as a test/dev
+# extra -- its actual install has NO upper bound on transformers at all. An
+# unpinned install can therefore grab a brand-new transformers major version
+# diffusers was never built against, breaking at runtime (e.g. "cannot
+# import name 'Dinov2WithRegistersConfig' from 'transformers'" when
+# transformers 5.x lands alongside diffusers built for the 4.x line). Pin it
+# ourselves since diffusers doesn't.
+REQUIRED_PACKAGES = ["torch", "diffusers", "transformers<5", "accelerate", "safetensors"]
 
 StatusFn = Optional[Callable[[str], None]]
 
@@ -32,12 +39,26 @@ _lock = threading.Lock()
 
 def packages_installed() -> bool:
     """Cheap check (no heavy imports) so callers -- e.g. the permission
-    prompt -- can tell whether the first-use install still needs to happen."""
+    prompt -- can tell whether the first-use install still needs to happen.
+    Also catches an already-installed-but-incompatible transformers (see
+    REQUIRED_PACKAGES) so a broken install self-heals on the next call
+    instead of silently staying broken forever."""
     import importlib.util
-    return all(
+    if not all(
         importlib.util.find_spec(pkg) is not None
         for pkg in ("torch", "diffusers", "transformers", "accelerate")
-    )
+    ):
+        return False
+    return _transformers_version_ok()
+
+
+def _transformers_version_ok() -> bool:
+    try:
+        import importlib.metadata
+        major = int(importlib.metadata.version("transformers").split(".")[0])
+        return major < 5
+    except Exception:
+        return True  # can't tell -- don't block on an unrelated parsing issue
 
 
 def _install_packages(status: StatusFn = None) -> None:
@@ -47,7 +68,11 @@ def _install_packages(status: StatusFn = None) -> None:
             "Installing local image-generation dependencies (first time only, "
             "~1-2GB download; this can take several minutes)..."
         )
-    cmd = [sys.executable, "-m", "pip", "install", "--user", *REQUIRED_PACKAGES]
+    # --upgrade matters here, not just for freshness: it's what actually
+    # corrects an already-installed-but-incompatible transformers (see
+    # REQUIRED_PACKAGES) -- without it, pip could see transformers is
+    # "already installed" and leave the broken version in place.
+    cmd = [sys.executable, "-m", "pip", "install", "--user", "--upgrade", *REQUIRED_PACKAGES]
     try:
         proc = subprocess.run(
             cmd, capture_output=True, text=True, timeout=900, **NO_WINDOW_KWARGS
