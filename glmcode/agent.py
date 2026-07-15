@@ -354,11 +354,24 @@ class Agent:
         Defaults to the user's configured Settings voice/speed (the same
         ones the read-aloud toggle uses) unless the model explicitly asks
         for something different."""
-        from .tts import DEFAULT_VOICE, save_wav
+        from .tts import DEFAULT_VOICE, list_voices, save_wav
         text = (text or "").strip()
         if not text:
             raise ToolError("speak needs a 'text'")
-        voice = (voice or "").strip() or self.cfg.tts_voice or DEFAULT_VOICE
+        requested_voice = (voice or "").strip()
+        if requested_voice:
+            # An invalid id would otherwise be silently swapped for
+            # DEFAULT_VOICE inside synthesize() -- correct but confusing,
+            # since the model never finds out its request didn't apply.
+            # Only validate an EXPLICIT request; the user's own configured
+            # voice (the no-argument default below) is trusted as-is.
+            valid = list_voices()
+            if requested_voice not in valid:
+                raise ToolError(
+                    f"'{requested_voice}' is not a valid voice id. Valid ids: "
+                    f"{', '.join(valid)}"
+                )
+        voice = requested_voice or self.cfg.tts_voice or DEFAULT_VOICE
         speed = speed if speed is not None else (self.cfg.tts_speed or 1.0)
 
         if path and path.strip():

@@ -27,6 +27,7 @@ import requests
 
 from .errors import ToolError as ToolErrorBase, ErrorSeverity
 from .logger import logger
+from .tts import FALLBACK_VOICES as _TTS_VOICES
 
 # Re-export as ToolError for backward compatibility (agent.py imports this name)
 ToolError = ToolErrorBase
@@ -1614,9 +1615,12 @@ TOOL_SCHEMAS = [
             "path": {"type": "string",
                     "description": "Where to save the WAV (optional; auto-named under "
                                    "'generated/' in the project folder if omitted)"},
-            "voice": {"type": "string",
-                     "description": "Kokoro voice name (optional; defaults to the user's "
-                                    "configured voice in Settings)"},
+            "voice": {"type": "string", "enum": list(_TTS_VOICES),
+                     "description": "Kokoro voice id, exact format xx_name (e.g. 'af_bella') "
+                                    "-- must be one of the listed enum values, not a "
+                                    "guessed/invented id or a plain name like 'bella'. "
+                                    "Optional; defaults to the user's configured voice in "
+                                    "Settings if omitted."},
             "speed": {"type": "number",
                      "description": "Speech speed, 0.5-2.0 (optional; defaults to the user's "
                                     "configured speed in Settings)"},
