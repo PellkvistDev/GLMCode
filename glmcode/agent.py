@@ -17,9 +17,9 @@ from .api import ApiError, Cancelled, RateLimiter, Usage, ZaiClient, estimate_to
 from .config import Config
 from .events import AgentEvents
 from .permissions import PermissionEngine
-from .prompts import (COMPACT_PROMPT, CONTINUE_NUDGE, STEP_LIMIT_NUDGE,
-                      SUBAGENT_PREAMBLE, VIEW_IMAGE_PROMPT, VISION_ANALYSIS_PROMPT,
-                      build_system_prompt)
+from .prompts import (COMPACT_PROMPT, CONTINUE_NUDGE, STEER_NUDGE_TEMPLATE,
+                      STEP_LIMIT_NUDGE, SUBAGENT_PREAMBLE, VIEW_IMAGE_PROMPT,
+                      VISION_ANALYSIS_PROMPT, build_system_prompt)
 from .tools import (COMPACT_CONTEXT_TOOL, GENERATE_IMAGE_TOOL, PREVIEW_PAGE_TOOL,
                     REMEMBER_TOOL, SHOW_HTTP_CAT_TOOL, SHOW_IMAGE_TOOL, SPEAK_TOOL,
                     SUBAGENT_TOOL, TOOL_SCHEMAS, VIEW_IMAGE_TOOL, ToolError,
@@ -478,12 +478,16 @@ class Agent:
         return text
 
     def _inject_steer_messages(self) -> None:
-        """Drain the queued steering message, if any, into the conversation
-        as a regular user turn, and let the event sink show it arrived."""
+        """Drain the queued steering message, if any, into the conversation,
+        and let the event sink show it arrived. Wrapped with STEER_NUDGE_TEMPLATE
+        rather than sent as a bare user message: an unframed message mid-turn
+        reads to the model as a brand-new top-level instruction with equal
+        weight to the original task, which is why steering used to blow past
+        its scope entirely instead of just tweaking what was already underway."""
         text = self._take_pending_steer()
         if not text:
             return
-        self.messages.append({"role": "user", "content": text})
+        self.messages.append({"role": "user", "content": STEER_NUDGE_TEMPLATE.format(text=text)})
         self.events.steered(text)
 
     def _run_turn(self, user_message: dict) -> None:

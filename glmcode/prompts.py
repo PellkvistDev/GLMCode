@@ -206,6 +206,16 @@ CONTINUE_NUDGE = (
 )
 
 
+STEER_NUDGE_TEMPLATE = (
+    "[Steering tip from the user, sent while you were already working -- this is "
+    "NOT a new task and does not replace or override what you're doing. Keep "
+    "working on the SAME task, with the SAME scope, and just factor this tip in "
+    "along the way. Do not restart, do not treat this as a new set of "
+    "instructions, do not expand scope to cover unrelated things it mentions "
+    "unless they're clearly part of the task already in progress.]\n\n{text}"
+)
+
+
 STEP_LIMIT_NUDGE = (
     "You've used all the tool-calling steps available for this turn. Stop calling "
     "tools now and reply with a plain-text summary: what you did, what you found, "
