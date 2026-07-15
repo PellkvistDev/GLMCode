@@ -151,7 +151,13 @@ body {
               right 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.05);
 }
 body.sidebar-open #chat { left: var(--sidebar-w); }
-body.subagent-open #chat { right: 50%; }
+/* The base padding formula assumes #chat spans (nearly) the full viewport --
+   for a `position: fixed` box, percentage padding resolves against the
+   viewport regardless of left/right, so it doesn't shrink along with the
+   box when the panel narrows it to half width. Left unfixed, padding-left +
+   padding-right alone can exceed the box's own width (collapsing the
+   content area to nothing -- every word wraps onto its own line). */
+body.subagent-open #chat { right: 50%; padding-left: 24px; padding-right: 24px; }
 #chat::-webkit-scrollbar { width: 9px; }
 #chat::-webkit-scrollbar-thumb {
   background: rgba(255, 255, 255, 0.14); border-radius: 8px;
@@ -527,7 +533,8 @@ body.subagent-open #subagent-panel { transform: translateX(0); }
               right 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.05);
 }
 body.sidebar-open #composer-wrap { left: var(--sidebar-w); }
-body.subagent-open #composer-wrap { right: 50%; }
+/* Same fixed-position padding-vs-viewport issue as #chat above. */
+body.subagent-open #composer-wrap { right: 50%; padding-left: 24px; padding-right: 24px; }
 
 body.no-session #composer, body.no-session #attach-btn, body.no-session #composer-wrap .status-chip {
   opacity: 0.4; pointer-events: none;
