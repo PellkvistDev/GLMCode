@@ -298,6 +298,9 @@ class WebEvents(AgentEvents):
     def steer_returned(self, text):
         self.emit("steer_returned", text=text)
 
+    def wrapup_requested(self):
+        self.emit("wrapup_requested")
+
     # sub-agents ----------------------------------------------------------
     def subagent(self, id, name, status, mission="", summary=""):
         self.emit("subagent", id=id, name=name, status=status,
@@ -867,6 +870,13 @@ class Api:
     def steer_subagent_clear(self, aid: str):
         if self._agent:
             self._agent.clear_steer_subagent(aid)
+        return {"ok": True}
+
+    def wrapup_subagent(self, aid: str):
+        if not self._agent:
+            return {"error": "no active chat"}
+        if not self._agent.wrapup_subagent(aid):
+            return {"error": "that sub-agent is no longer running"}
         return {"ok": True}
 
     def permission_response(self, rid: str, answer: str, feedback: str = ""):

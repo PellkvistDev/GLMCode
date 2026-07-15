@@ -19,7 +19,7 @@ from .events import AgentEvents
 from .permissions import PermissionEngine
 from .prompts import (COMPACT_PROMPT, CONTINUE_NUDGE, STEER_NUDGE_TEMPLATE,
                       STEP_LIMIT_NUDGE, SUBAGENT_PREAMBLE, VIEW_IMAGE_PROMPT,
-                      VISION_ANALYSIS_PROMPT, build_system_prompt)
+                      VISION_ANALYSIS_PROMPT, WRAP_UP_NUDGE, build_system_prompt)
 from .tools import (COMPACT_CONTEXT_TOOL, GENERATE_IMAGE_TOOL, PREVIEW_PAGE_TOOL,
                     REMEMBER_TOOL, SHOW_HTTP_CAT_TOOL, SHOW_IMAGE_TOOL, SPEAK_TOOL,
                     SUBAGENT_TOOL, TOOL_SCHEMAS, VIEW_IMAGE_TOOL, ToolError,
@@ -95,6 +95,9 @@ class _CaptureEvents(AgentEvents):
     def steer_returned(self, text: str) -> None:
         self._forward(self._aid, "steer_returned", text=text)
 
+    def wrapup_requested(self) -> None:
+        self._forward(self._aid, "wrapup_requested")
+
 
 class Agent:
     def __init__(self, cfg: Config, client: ZaiClient, events: AgentEvents | None = None,
@@ -109,6 +112,12 @@ class Agent:
         self.messages: list[dict] = []
         self.session_usage = Usage()
         self.cancel = threading.Event()
+        # Like cancel, but cooperative rather than immediate: doesn't abort
+        # the current tool call, just skips straight to a forced final
+        # answer (tools withheld) at the next safe checkpoint -- for a
+        # sub-agent, "stop researching and write the report now" instead of
+        # "stop instantly, no report at all" (see request_wrapup).
+        self.wrap_up_requested = threading.Event()
         self.busy = False
         # Sub-agents don't get the spawning tool themselves (no recursion).
         self.allow_subagents = allow_subagents
@@ -418,6 +427,7 @@ class Agent:
     def run_turn(self, user_message: dict) -> None:
         """One user turn: append the message, loop model+tools until done."""
         self.cancel.clear()
+        self.wrap_up_requested.clear()
         self.busy = True
         try:
             self._run_turn(user_message)
@@ -463,6 +473,22 @@ class Agent:
         if sub is None:
             return False
         return sub.steer(text)
+
+    def request_wrapup(self) -> None:
+        """Cooperatively force this agent to stop calling tools and write its
+        final report at the next safe checkpoint (after whatever tool call is
+        currently in flight finishes), instead of continuing to work."""
+        self.wrap_up_requested.set()
+
+    def wrapup_subagent(self, aid: str) -> bool:
+        """Forward a wrap-up request to a specific running sub-agent by id.
+        Returns False if that sub-agent isn't currently running."""
+        with self._active_subagents_lock:
+            sub = self._active_subagents.get(aid)
+        if sub is None:
+            return False
+        sub.request_wrapup()
+        return True
 
     def clear_steer_subagent(self, aid: str) -> bool:
         with self._active_subagents_lock:
@@ -531,6 +557,12 @@ class Agent:
 
             self._inject_steer_messages()
 
+            if self.wrap_up_requested.is_set():
+                self.wrap_up_requested.clear()
+                self.events.wrapup_requested()
+                self._forced_wrapup(model, WRAP_UP_NUDGE)
+                return
+
         # The loop ran out of steps without the model ever giving a plain-
         # text answer -- its last action was a tool call, so self.messages
         # currently ends on an assistant turn with no reportable content.
@@ -541,7 +573,16 @@ class Agent:
         # "(sub-agent produced no final report)". Force one last call with
         # tools withheld so it can't just make another one instead of
         # answering.
-        self.messages.append({"role": "user", "content": STEP_LIMIT_NUDGE})
+        self._forced_wrapup(model, STEP_LIMIT_NUDGE)
+        self.events.warn(f"stopped after {self.cfg.max_turns_per_request} agentic "
+                         "steps; say 'continue' to let it keep going")
+
+    def _forced_wrapup(self, model: str, nudge: str) -> None:
+        """Append `nudge` and force one last call with tools withheld, so the
+        model can't just make another tool call instead of answering. Used
+        both when the step-limit is hit and when the user explicitly asks a
+        sub-agent to wrap up early (see request_wrapup/wrapup_subagent)."""
+        self.messages.append({"role": "user", "content": nudge})
         try:
             result = self.client.chat(
                 model=model, messages=self.messages, tools=None,
@@ -553,10 +594,7 @@ class Agent:
             self.session_usage.add(result.usage)
             self.messages.append(result.to_message())
         except (ApiError, Cancelled, KeyboardInterrupt):
-            pass  # best-effort wrap-up -- fall through to the warning either way
-
-        self.events.warn(f"stopped after {self.cfg.max_turns_per_request} agentic "
-                         "steps; say 'continue' to let it keep going")
+            pass  # best-effort wrap-up either way
 
     def _call_model(self, model: str):
         self._refresh_context_note()

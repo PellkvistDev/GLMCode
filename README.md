@@ -174,6 +174,12 @@ turns orange instead of disappearing. It doesn't interrupt whatever's running
 the model's next step, and a small note appears in the thread marking where
 it was injected.
 
+Each sub-agent's mini-composer also has a red **wrap-up** button — unlike a
+hard stop, it doesn't cut the sub-agent off instantly. It finishes whatever
+tool call is already in flight, then is forced to stop researching and write
+its final report immediately instead of continuing, so you still get a
+summary of what it found rather than nothing at all.
+
 ### Voice
 
 Two independent features, both powered by [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M)

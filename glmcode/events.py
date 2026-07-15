@@ -49,6 +49,11 @@ class AgentEvents:
         attach it to). The frontend should put it back wherever the user can
         resend it, rather than let it silently carry over."""
 
+    def wrapup_requested(self) -> None:
+        """A forced wrap-up (see request_wrapup/wrapup_subagent) is about to
+        run: the agent stops calling tools and writes its report now, instead
+        of continuing to work. No-op unless a UI is attached."""
+
     # -- context compaction ----------------------------------------------- #
     def compacted(self, summary: str) -> None:
         """The conversation was summarized; `summary` is the retained context."""

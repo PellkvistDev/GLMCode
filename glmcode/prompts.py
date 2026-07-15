@@ -206,6 +206,14 @@ CONTINUE_NUDGE = (
 )
 
 
+WRAP_UP_NUDGE = (
+    "The user has asked you to stop researching/working now and report immediately -- "
+    "do not call any more tools. Reply with a plain-text summary: what you found or did "
+    "so far, and clearly flag anything that remains unfinished, unverified, or cut short "
+    "because you were stopped early."
+)
+
+
 STEER_NUDGE_TEMPLATE = (
     "[Steering tip from the user, sent while you were already working -- this is "
     "NOT a new task and does not replace or override what you're doing. Keep "

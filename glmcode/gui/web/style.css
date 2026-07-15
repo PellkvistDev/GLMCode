@@ -138,6 +138,7 @@ body {
 .icon-btn svg { width: 19px; height: 19px; }
 .icon-btn:hover { background: var(--glass-hi); color: var(--text); }
 .icon-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.icon-btn:disabled { opacity: 0.35; cursor: default; background: transparent; color: var(--text-faint); }
 
 /* ------------------------------------------------ chat */
 #chat {
@@ -387,6 +388,11 @@ body.subagent-open #subagent-panel { transform: translateX(0); }
 #subagent-send-btn:hover { filter: brightness(1.12); }
 #subagent-send-btn:active { transform: scale(0.93); }
 #subagent-send-btn:disabled { opacity: 0.35; cursor: default; filter: none; }
+.subagent-wrapup-btn {
+  width: 32px; height: 32px; color: #ff8f88;
+}
+.subagent-wrapup-btn svg { width: 14px; height: 14px; }
+.subagent-wrapup-btn:hover { background: rgba(255, 69, 58, 0.15); color: #ff453a; }
 
 /* generated / shown images */
 .image-card {
