@@ -13,6 +13,7 @@ import shutil
 import subprocess
 import sys
 import threading
+import time
 import uuid
 import webbrowser
 from contextlib import contextmanager
@@ -69,6 +70,26 @@ class WebEvents(AgentEvents):
         self._tts_worker_started = False
         self._tts_seq = 0
         self._tts_first_chunk_done = False
+        # evaluate_js is not safe to call from several threads at once (see
+        # emit()) -- previously this was only ever called from a single
+        # thread at a time in practice (whichever thread was streaming the
+        # model response), but the new background flush thread below and
+        # sub-agent worker threads can now genuinely race with it.
+        self._evaluate_lock = threading.Lock()
+
+        # -- streaming display buffer --------------------------------------
+        # evaluate_js() is a synchronous, blocking round trip through the
+        # WebView2 UI thread (Invoke -> ExecuteScriptAsync -> await the
+        # result) -- calling it once per raw SSE delta, as this used to do,
+        # serializes the *network read* itself behind UI-thread scheduling
+        # latency: the streaming loop in api.py can't pull the next chunk
+        # off the wire until the previous one's full IPC round trip
+        # completes. Buffering deltas and flushing on a timer instead turns
+        # many small blocking round trips into far fewer, larger ones.
+        self._stream_lock = threading.Lock()
+        self._content_buf = ""
+        self._reasoning_buf = ""
+        self._flush_thread_started = False
 
     def emit(self, type_: str, **data) -> None:
         if not self._window:
@@ -77,29 +98,61 @@ class WebEvents(AgentEvents):
         try:
             # Hand the event to the page's sink. The payload is already
             # JSON-encoded, so it drops straight into the JS call.
-            self._window.evaluate_js(
-                f"window.GLM && window.GLM.emit({payload});"
-            )
+            # evaluate_js isn't safe to call from several threads at once
+            # (the flush thread, sub-agent worker threads, and whichever
+            # thread is running the agent loop can all reach this).
+            with self._evaluate_lock:
+                self._window.evaluate_js(
+                    f"window.GLM && window.GLM.emit({payload});"
+                )
         except Exception:
             # A dropped UI update must never take down the agent turn.
             pass
 
     # streaming ---------------------------------------------------------
+    _STREAM_FLUSH_INTERVAL = 0.06  # seconds
+
+    def _ensure_flush_thread(self) -> None:
+        if self._flush_thread_started:
+            return
+        self._flush_thread_started = True
+        threading.Thread(target=self._flush_loop, daemon=True).start()
+
+    def _flush_loop(self) -> None:
+        while True:
+            time.sleep(self._STREAM_FLUSH_INTERVAL)
+            self._flush_stream_buffers()
+
+    def _flush_stream_buffers(self) -> None:
+        with self._stream_lock:
+            content, self._content_buf = self._content_buf, ""
+            reasoning, self._reasoning_buf = self._reasoning_buf, ""
+        if reasoning:
+            self.emit("reasoning", text=reasoning)
+        if content:
+            self.emit("content", text=content)
+
     def stream_start(self):
+        self._flush_stream_buffers()  # flush any straggler left from a prior round
         self.emit("stream_start")
         self._tts_raw = ""
         self._tts_sent_len = 0
         self._tts_buffer = ""
 
     def reasoning_delta(self, text):
-        self.emit("reasoning", text=text)
+        with self._stream_lock:
+            self._reasoning_buf += text
+        self._ensure_flush_thread()
 
     def content_delta(self, text):
-        self.emit("content", text=text)
+        with self._stream_lock:
+            self._content_buf += text
+        self._ensure_flush_thread()
         if self.read_aloud_this_turn:
             self._feed_tts(text)
 
     def stream_end(self):
+        self._flush_stream_buffers()  # make sure everything is sent before stream_end
         self.emit("stream_end")
         if self.read_aloud_this_turn and self._tts_buffer.strip():
             self._enqueue_tts_chunk(self._tts_buffer.strip())
