@@ -47,6 +47,14 @@ class AgentEvents:
                  mission: str = "", summary: str = "") -> None:
         """Progress for a parallel sub-agent. status: 'running' | 'done' | 'error'."""
 
+    def subagent_stream(self, id: str, kind: str, **data) -> None:
+        """A single granular live event from inside a sub-agent's own run,
+        tagged with its id -- e.g. kind='reasoning'/'content' with a 'text'
+        payload, 'tool_call' with 'name'/'args', 'tool_result' with
+        'name'/'content'/'is_error', or 'stream_start'/'stream_end' with no
+        payload. Lets a UI show a sub-agent's own thread live, not just the
+        coarse start/done/error status from subagent()."""
+
     # -- images ------------------------------------------------------------ #
     def show_image(self, path: str, caption: str = "") -> None:
         """Display an image inline for the user. No-op unless a UI is attached."""

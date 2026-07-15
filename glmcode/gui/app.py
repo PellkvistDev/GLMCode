@@ -294,6 +294,9 @@ class WebEvents(AgentEvents):
         self.emit("subagent", id=id, name=name, status=status,
                   mission=mission, summary=summary)
 
+    def subagent_stream(self, id, kind, **data):
+        self.emit("subagent_stream", id=id, kind=kind, **data)
+
     # images ----------------------------------------------------------------
     def show_image(self, path, caption=""):
         try:

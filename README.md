@@ -156,6 +156,17 @@ right because the code compiled. The **first** use installs Playwright and
 downloads Chromium (~150-300MB, one-time); every call after that runs fully
 offline aside from loading the page itself.
 
+### Sub-agents
+
+For work that splits into independent parts (research across several areas,
+unrelated bugs, separate files), the agent can spawn up to 6 sub-agents that
+run in parallel, each with its own mission, then reports back a summary from
+each. Click any sub-agent's row in the chat to open its own live thread in a
+slide-out panel on the right — the same reasoning/tool-call view you get for
+the main agent, so you can see exactly what a specific sub-agent is doing.
+Click another sub-agent's row (or its tab in the panel) to switch between
+them, or the **✕** to close the panel.
+
 ### Voice
 
 Two independent features, both powered by [Kokoro](https://huggingface.co/hexgrad/Kokoro-82M)

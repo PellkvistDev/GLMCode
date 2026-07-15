@@ -118,6 +118,18 @@
   </div>
 </footer>
 
+<!-- Sub-agent inspector: click a sub-agent row in the chat to watch its own
+     live thread here, side by side with the main chat. -->
+<aside id="subagent-panel" aria-label="Sub-agent thread">
+  <div class="subagent-panel-head">
+    <div id="subagent-tabs" class="subagent-tabs"></div>
+    <button id="subagent-panel-close" class="icon-btn" aria-label="Close sub-agent panel" title="Close">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+    </button>
+  </div>
+  <div id="subagent-panel-body" aria-live="polite"></div>
+</aside>
+
 <!-- Toasts -->
 <div id="toasts" aria-live="polite"></div>
 

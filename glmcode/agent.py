@@ -56,15 +56,37 @@ def _final_report_text(messages: list) -> str:
 
 
 class _CaptureEvents(AgentEvents):
-    """Non-interactive event sink for a sub-agent: captures streamed text and,
-    by inheriting AgentEvents, auto-denies any permission prompt (so a sub-agent
+    """Non-interactive event sink for a sub-agent: captures streamed text
+    (for _run_single_subagent's final-report fallback chain) and forwards
+    every granular event to the coordinator's own event sink, tagged with
+    this sub-agent's id, so a UI can show its live thread -- not just the
+    coarse start/done/error status from Agent.subagent(). By inheriting
+    AgentEvents it also auto-denies any permission prompt (so a sub-agent
     can only do what the current mode allows without asking)."""
 
-    def __init__(self):
+    def __init__(self, forward, aid: str):
         self.text = ""
+        self._forward = forward
+        self._aid = aid
+
+    def stream_start(self) -> None:
+        self._forward(self._aid, "stream_start")
+
+    def stream_end(self) -> None:
+        self._forward(self._aid, "stream_end")
+
+    def reasoning_delta(self, text: str) -> None:
+        self._forward(self._aid, "reasoning", text=text)
 
     def content_delta(self, text: str) -> None:
         self.text += text
+        self._forward(self._aid, "content", text=text)
+
+    def tool_call(self, name: str, args: dict) -> None:
+        self._forward(self._aid, "tool_call", name=name, args=args)
+
+    def tool_result(self, name: str, content: str, is_error: bool = False) -> None:
+        self._forward(self._aid, "tool_result", name=name, content=content, is_error=is_error)
 
 
 class Agent:
@@ -568,6 +590,10 @@ class Agent:
         with self._emit_lock:
             self.events.subagent(*args, **kwargs)
 
+    def _emit_subagent_stream(self, aid: str, kind: str, **data) -> None:
+        with self._emit_lock:
+            self.events.subagent_stream(aid, kind, **data)
+
     def _run_subagents(self, specs: list) -> str:
         """Run each spec as an autonomous agent on its own thread, in parallel,
         and return a combined report for the coordinating model."""
@@ -592,7 +618,7 @@ class Agent:
                 self._emit_subagent(aid, name, "error", summary="no task given")
                 return
             try:
-                report = self._run_single_subagent(name, task, limiter)
+                report = self._run_single_subagent(name, task, limiter, aid)
                 results[i] = (name, report, None)
                 self._emit_subagent(aid, name, "done", summary=_first_line(report))
             except Exception as e:  # keep one failure from sinking the rest
@@ -619,14 +645,14 @@ class Agent:
                 out.append(f"### {name}\n{report or '(no output)'}\n")
         return "\n".join(out)
 
-    def _run_single_subagent(self, name: str, task: str, limiter: RateLimiter) -> str:
+    def _run_single_subagent(self, name: str, task: str, limiter: RateLimiter, aid: str) -> str:
         """One sub-agent: a fresh Agent (own client + non-interactive sink) that
         runs its mission to completion and returns its final report text."""
         # A separate client per thread avoids sharing one requests.Session
         # across concurrent requests; the rate limiter IS shared (see
         # _run_subagents) so all sub-agents' requests stay spaced out.
         client = ZaiClient(self.client.api_key, self.client.base_url, rate_limiter=limiter)
-        sink = _CaptureEvents()
+        sink = _CaptureEvents(forward=self._emit_subagent_stream, aid=aid)
         sub = Agent(self.cfg, client, events=sink, allow_subagents=False)
         sub.run_turn({"role": "user",
                       "content": SUBAGENT_PREAMBLE.format(name=name, task=task)})
