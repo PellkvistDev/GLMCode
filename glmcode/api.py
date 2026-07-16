@@ -11,6 +11,7 @@ from __future__ import annotations
 import base64
 import json
 import mimetypes
+import random
 import threading
 import time
 from dataclasses import dataclass, field
@@ -61,7 +62,7 @@ class ChatResult:
 
 
 RETRYABLE = {429, 500, 502, 503, 504}
-MAX_RETRIES = 6
+MAX_RETRIES = 8
 
 
 class RateLimiter:
@@ -131,9 +132,16 @@ class ZaiClient:
         last_err: Optional[Exception] = None
         for attempt in range(MAX_RETRIES):
             if attempt > 0:
-                wait = min(2 ** attempt, 30)
+                base = min(2 ** attempt, 30)
                 if isinstance(last_err, ApiError) and last_err.status == 429:
-                    wait = max(wait, 2)
+                    base = max(base, 2)
+                # Full jitter (sleep a random amount in [0, base]) rather than
+                # a fixed backoff: several parallel sub-agents that hit the
+                # same 429 at the same instant would otherwise all wait the
+                # SAME amount and retry in lockstep -- colliding again and
+                # burning their retry budget on the same synchronized spike.
+                # Randomizing spreads their retries out so they stop fighting.
+                wait = round(random.uniform(base / 2, base), 1)
                 if on_status:
                     on_status(f"retrying in {wait}s ({last_err})")
                 time.sleep(wait)
