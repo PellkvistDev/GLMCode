@@ -329,8 +329,10 @@ body.subagent-open #subagent-panel { transform: translateX(0); }
   padding: 9px 10px; flex: none;
   border-bottom: 1px solid var(--stroke-soft);
 }
-.subagent-tabs { flex: 1; display: flex; gap: 6px; overflow-x: auto; }
-.subagent-tabs::-webkit-scrollbar { height: 0; }
+/* Wrap instead of overflowing horizontally: tabs accumulate over a long
+   chat (one per sub-agent per batch), and with overflow-x the ones past the
+   right edge were effectively unreachable (the scrollbar was hidden). */
+.subagent-tabs { flex: 1; display: flex; gap: 6px; flex-wrap: wrap; min-width: 0; }
 .subagent-tab {
   display: flex; align-items: center; gap: 7px; flex: none;
   font-family: var(--font); font-size: 12px; font-weight: 600;

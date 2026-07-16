@@ -35,6 +35,14 @@ def _first_line(text: str, limit: int = 280) -> str:
     return line[:limit]
 
 
+def _msg_text(m: dict) -> str:
+    """A message's text content, whether plain or multimodal parts."""
+    c = m.get("content")
+    if isinstance(c, list):
+        return " ".join(p.get("text", "") for p in c if p.get("type") == "text")
+    return c or ""
+
+
 def _final_report_text(messages: list) -> str:
     """The last assistant answer in a transcript, stitched back together if
     it was split across several messages by the auto-continuation-on-
@@ -150,6 +158,11 @@ class Agent:
         # specific running sub-agent's Agent instance to steer it directly.
         self._active_subagents: dict[str, "Agent"] = {}
         self._active_subagents_lock = threading.Lock()
+        # Optional append-only conversation log (see transcript.py). Set by
+        # the frontend after construction; None (all hooks no-op) in the CLI
+        # and for sub-agents (their reports land in the parent's transcript
+        # via the spawn_agents tool result).
+        self.transcript = None
         self.rebuild_system_prompt()
 
     # ------------------------------------------------------------------ #
@@ -159,6 +172,11 @@ class Agent:
         # usage note (see _refresh_context_note) doesn't need to re-run
         # build_system_prompt's git subprocess calls on every model call.
         self._base_system_prompt = build_system_prompt(Path.cwd(), self.cfg.model)
+        if self.transcript:
+            # Tell the model its transcript files exist and where, so it can
+            # grep them for anything compacted out of context or said in a
+            # past chat.
+            self._base_system_prompt += self.transcript.prompt_note()
         sys_msg = {"role": "system", "content": self._with_usage_note(self._base_system_prompt)}
         if self.messages and self.messages[0].get("role") == "system":
             self.messages[0] = sys_msg
@@ -525,11 +543,27 @@ class Agent:
         if not text:
             return
         self.messages.append({"role": "user", "content": STEER_NUDGE_TEMPLATE.format(text=text)})
+        if self.transcript:
+            self.transcript.user(text, label="User (steering)")
         self.events.steered(text)
+
+    def _log_assistant_msg(self, msg: dict) -> None:
+        """Append an assistant message (text and/or tool calls) to the
+        transcript, if one is attached. Call right after every
+        self.messages.append(<assistant message>) site."""
+        if not self.transcript:
+            return
+        calls = []
+        for tc in msg.get("tool_calls") or []:
+            fn = tc.get("function", {})
+            calls.append(f"{fn.get('name', '?')}({(fn.get('arguments') or '')[:300]})")
+        self.transcript.assistant(msg.get("content") or "", calls)
 
     def _run_turn(self, user_message: dict) -> None:
         self.maybe_autocompact()
         self.messages.append(user_message)
+        if self.transcript:
+            self.transcript.user(_msg_text(user_message))
 
         model = self.cfg.model
         if self._payload_has_images():
@@ -552,10 +586,14 @@ class Agent:
                     "role": "assistant",
                     "content": "(response interrupted by user)",
                 })
+                if self.transcript:
+                    self.transcript.marker("response interrupted by user")
                 return
 
             self.session_usage.add(result.usage)
-            self.messages.append(result.to_message())
+            msg = result.to_message()
+            self.messages.append(msg)
+            self._log_assistant_msg(msg)
 
             if not result.tool_calls:
                 return  # final answer already streamed
@@ -608,7 +646,9 @@ class Agent:
                 cancel=self.cancel,
             )
             self.session_usage.add(result.usage)
-            self.messages.append(result.to_message())
+            msg = result.to_message()
+            self.messages.append(msg)
+            self._log_assistant_msg(msg)
         except (ApiError, Cancelled, KeyboardInterrupt):
             pass  # best-effort wrap-up either way
         finally:
@@ -650,7 +690,9 @@ class Agent:
                 f"response hit the output limit; continuing automatically "
                 f"({nudges}/{MAX_CONTINUATIONS})..."
             )
-            self.messages.append(result.to_message())
+            frag = result.to_message()
+            self.messages.append(frag)
+            self._log_assistant_msg(frag)  # each split fragment, in order
             self.messages.append({"role": "user", "content": CONTINUE_NUDGE})
             result = self._call_model(model)
         if result.finish_reason == "length" and not result.tool_calls:
@@ -738,6 +780,8 @@ class Agent:
     def _tool_reply(self, tc: dict, content: str, error: bool = False,
                     name: str = "", args: dict | None = None) -> None:
         self.events.tool_result(name, content, is_error=error)
+        if self.transcript:
+            self.transcript.tool_result(name, content, is_error=error)
         self.messages.append({
             "role": "tool",
             "tool_call_id": tc["id"],
@@ -890,6 +934,10 @@ class Agent:
         summary = result.content.strip()
         self.session_usage.add(result.usage)
         self.events.compacted(summary)
+        if self.transcript:
+            self.transcript.marker(
+                "Context compacted here -- everything above this line is no "
+                "longer in the model's context (this transcript keeps it all)")
         self.messages = [self.messages[0], {
             "role": "user",
             "content": ("[Context was compacted. Summary of the session so far:]\n\n"

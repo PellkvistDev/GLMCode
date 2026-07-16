@@ -215,6 +215,15 @@ which also lists snapshots (by the message that triggered them) with a
 **Revert** button, plus a one-click **Revert last turn**. Reverting only
 changes files on disk — the chat conversation itself isn't affected.
 
+### Transcripts
+
+Every chat's full conversation is also appended to a plain markdown
+transcript (`~/.glmcode/transcripts/`, one file per chat) — including
+everything that compaction later summarizes away. The agent is told where
+these live, so it can grep them itself: ask about something from earlier
+that's no longer in its context — or from a *previous chat entirely* — and
+it looks it up instead of guessing. Deleting a chat deletes its transcript.
+
 ### Permission modes
 
 | Mode | File edits | Shell commands |

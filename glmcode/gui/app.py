@@ -30,6 +30,7 @@ from ..config import CONFIG_DIR, PERMISSION_MODES, Config, load_config, save_con
 from ..events import AgentEvents
 from ..prompts import TITLE_PROMPT
 from ..sessions import SessionStore, new_id, to_display
+from ..transcript import Transcript
 from ..tools import configure_search, get_todos, restore_todos
 from ..permissions import add_command_aliases
 
@@ -675,6 +676,10 @@ class Api:
         self.session_title = title
         self.auto_backup = auto_backup
         self._backup_repo = BackupRepo(sid, Path.cwd()) if cwd_ok else None
+        # Append-only conversation log; rebuild so the system prompt gains
+        # the note telling the model these files exist and how to grep them.
+        agent.transcript = Transcript(sid, cwd=str(Path.cwd()))
+        agent.rebuild_system_prompt()
         restore_todos(todos)
         self._cfg.last_session_id = sid
         save_config(self._cfg)
@@ -753,6 +758,7 @@ class Api:
 
     def delete_session(self, sid: str):
         self._store.delete(sid)
+        Transcript(sid).delete()  # its transcript goes with it
         closed_active = sid == self.session_id
         if closed_active:
             self._agent = None
