@@ -91,6 +91,13 @@ class WebEvents(AgentEvents):
         self._stream_lock = threading.Lock()
         self._content_buf = ""
         self._reasoning_buf = ""
+        # Sub-agent reasoning/content deltas get the same treatment, buffered
+        # per sub-agent id. Without this, every token from every parallel
+        # sub-agent was its own synchronous evaluate_js round trip -- all
+        # contending on _evaluate_lock, each one also blocking that
+        # sub-agent's own network read. With 4-6 sub-agents streaming, the
+        # whole app crawled.
+        self._sub_bufs: dict = {}  # aid -> {"reasoning": str, "content": str}
         self._flush_thread_started = False
 
     def emit(self, type_: str, **data) -> None:
@@ -129,10 +136,36 @@ class WebEvents(AgentEvents):
         with self._stream_lock:
             content, self._content_buf = self._content_buf, ""
             reasoning, self._reasoning_buf = self._reasoning_buf, ""
+            subs = []
+            for aid, buf in self._sub_bufs.items():
+                if buf["reasoning"] or buf["content"]:
+                    subs.append((aid, buf["reasoning"], buf["content"]))
+                    buf["reasoning"] = ""
+                    buf["content"] = ""
         if reasoning:
             self.emit("reasoning", text=reasoning)
         if content:
             self.emit("content", text=content)
+        for aid, r, c in subs:
+            if r:
+                self.emit("subagent_stream", id=aid, kind="reasoning", text=r)
+            if c:
+                self.emit("subagent_stream", id=aid, kind="content", text=c)
+
+    def _flush_one_subagent(self, aid) -> None:
+        """Flush a single sub-agent's buffered text NOW -- called before any
+        of its non-text events (tool_call, stream_start, ...) so those can't
+        overtake text that streamed before them."""
+        with self._stream_lock:
+            buf = self._sub_bufs.get(aid)
+            if not buf:
+                return
+            r, buf["reasoning"] = buf["reasoning"], ""
+            c, buf["content"] = buf["content"], ""
+        if r:
+            self.emit("subagent_stream", id=aid, kind="reasoning", text=r)
+        if c:
+            self.emit("subagent_stream", id=aid, kind="content", text=c)
 
     def stream_start(self):
         self._flush_stream_buffers()  # flush any straggler left from a prior round
@@ -307,6 +340,23 @@ class WebEvents(AgentEvents):
                   mission=mission, summary=summary)
 
     def subagent_stream(self, id, kind, **data):
+        # Text deltas are by far the highest-frequency events and each emit()
+        # is a blocking evaluate_js round trip -- buffer them per sub-agent
+        # and let the flush thread batch them (see _flush_stream_buffers).
+        if kind in ("reasoning", "content"):
+            with self._stream_lock:
+                buf = self._sub_bufs.setdefault(id, {"reasoning": "", "content": ""})
+                buf[kind] += data.get("text", "")
+            self._ensure_flush_thread()
+            return
+        # Everything else is rare but must stay ordered relative to the text
+        # that streamed before it.
+        self._flush_one_subagent(id)
+        if kind == "tool_result":
+            # Match the main chat's display cap -- the model already got the
+            # full content; shipping up to 60KB per blocking IPC call to the
+            # UI just to fill a collapsed chip was pure waste.
+            data = dict(data, content=str(data.get("content", ""))[:12000])
         self.emit("subagent_stream", id=id, kind=kind, **data)
 
     # images ----------------------------------------------------------------
@@ -809,7 +859,11 @@ class Api:
             # must never block sending a message.
             if self.auto_backup and self._backup_repo:
                 try:
-                    self._backup_repo.snapshot(text or "(files attached)")
+                    # Visible in the status chip: on a big project the git
+                    # snapshot can take a moment, and silent pre-turn latency
+                    # reads as "the app is slow" rather than "it's working".
+                    with self._events.status("backing up project files..."):
+                        self._backup_repo.snapshot(text or "(files attached)")
                 except Exception as e:
                     self._events.warn(f"backup snapshot failed: {e}")
             # Snapshot the read-aloud toggle for this turn only: if it's off

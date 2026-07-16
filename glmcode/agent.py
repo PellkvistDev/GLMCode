@@ -594,6 +594,11 @@ class Agent:
         both when the step-limit is hit and when the user explicitly asks a
         sub-agent to wrap up early (see request_wrapup/wrapup_subagent)."""
         self.messages.append({"role": "user", "content": nudge})
+        # Framed with stream_start/stream_end like every other model call --
+        # without them the GUI never reset its per-round render state (the
+        # wrap-up text also skipped the buffered-flush path), and the
+        # terminal UI's live spinner state got confused.
+        self.events.stream_start()
         try:
             result = self.client.chat(
                 model=model, messages=self.messages, tools=None,
@@ -606,6 +611,8 @@ class Agent:
             self.messages.append(result.to_message())
         except (ApiError, Cancelled, KeyboardInterrupt):
             pass  # best-effort wrap-up either way
+        finally:
+            self.events.stream_end()
 
     def _call_model(self, model: str):
         self._refresh_context_note()

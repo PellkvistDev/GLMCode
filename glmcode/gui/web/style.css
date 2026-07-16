@@ -166,6 +166,19 @@ body.subagent-open #chat { right: 50%; padding-left: 24px; padding-right: 24px; 
 }
 #chat::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.25); background-clip: padding-box; }
 
+/* floating jump-to-latest button (shown while scrolled up from the bottom) */
+.jump-bottom {
+  position: fixed; bottom: 142px; right: max(24px, calc(50% - 430px));
+  width: 38px; height: 38px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  border: 1px solid var(--stroke); color: var(--text-dim); cursor: pointer;
+  z-index: var(--z-composer);
+  transition: color 0.15s ease, transform 0.15s ease, right 0.3s cubic-bezier(0.2, 0.9, 0.3, 1.05);
+}
+.jump-bottom svg { width: 17px; height: 17px; }
+.jump-bottom:hover { color: var(--text); transform: translateY(-1px); }
+body.subagent-open .jump-bottom { right: calc(50% + 24px); }
+
 /* welcome */
 .welcome {
   margin: 9vh auto 0; max-width: 480px; text-align: center;

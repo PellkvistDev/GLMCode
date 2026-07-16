@@ -89,9 +89,33 @@ function colorDiff(text) {
 function nearBottom() {
   return chatEl.scrollHeight - chatEl.scrollTop - chatEl.clientHeight < 140;
 }
+// Follow-the-stream state is TRACKED from scroll events rather than measured
+// inside scrollDown(): measuring after the DOM just grew means any single
+// render that adds more height than the threshold (a big markdown block, a
+// batched sub-agent chunk) instantly "unpins" the view and the chat stops
+// following -- the classic broken-auto-scroll bug.
+let chatPinned = true;
 function scrollDown(force) {
-  if (force || nearBottom()) chatEl.scrollTop = chatEl.scrollHeight;
+  // behavior:"instant" on purpose (NOT "auto" -- per the CSSOM spec "auto"
+  // defers to the CSS scroll-behavior property, which is smooth here): the
+  // smooth animation, restarted a dozen times a second during streaming,
+  // never catches up and reads as lag. Smooth is kept for user-initiated
+  // jumps only.
+  if (force || chatPinned) chatEl.scrollTo({ top: chatEl.scrollHeight, behavior: "instant" });
 }
+
+// Floating "jump to bottom" button: appears whenever the user has scrolled
+// up out of the auto-follow zone (streaming never yanks them back down --
+// scrollDown() no-ops while unpinned).
+chatEl.addEventListener("scroll", () => {
+  chatPinned = nearBottom();
+  $("jump-bottom").hidden = chatPinned;
+}, { passive: true });
+$("jump-bottom").addEventListener("click", () => {
+  chatPinned = true;
+  chatEl.scrollTo({ top: chatEl.scrollHeight, behavior: "smooth" });
+  $("jump-bottom").hidden = true;
+});
 
 function toast(text, level = "info", ms = 4200) {
   const t = document.createElement("div");
@@ -308,6 +332,14 @@ function ensureTurn() {
   return current;
 }
 
+function flushThinkPending(t) {
+  if (t && t.thinkNode && t.reasonPending) {
+    t.thinkNode.appendData(t.reasonPending);
+    t.reasonPending = "";
+    if (t.thinking.open) t.thinkBody.scrollTop = t.thinkBody.scrollHeight;
+  }
+}
+
 function queueRender() {
   if (renderQueued) return;
   renderQueued = true;
@@ -318,11 +350,7 @@ function queueRender() {
       current.contentEl.innerHTML = md(current.content);
       current.mdDirty = false;
     }
-    if (current.thinkBody && current.thinkDirty) {
-      current.thinkBody.textContent = current.reasoning;
-      current.thinkDirty = false;
-      if (current.thinking.open) current.thinkBody.scrollTop = current.thinkBody.scrollHeight;
-    }
+    flushThinkPending(current);
     scrollDown();
   }, 80);
 }
@@ -369,12 +397,17 @@ function handle(ev) {
           `<summary><span class="think-dot"></span>Thinking…</summary>` +
           `<div class="thinking-body"></div>`;
         t.thinkBody = t.thinking.querySelector(".thinking-body");
-        t.reasoning = "";
+        // One persistent text node, grown with appendData(delta): rewriting
+        // the whole reasoning string via textContent on every flush was
+        // O(total length) per flush -- quadratic over a long burst, and GLM
+        // reasons a LOT.
+        t.thinkNode = document.createTextNode("");
+        t.thinkBody.appendChild(t.thinkNode);
+        t.reasonPending = "";
         t.wrap.appendChild(t.thinking);
         scrollDown();
       }
-      t.reasoning += ev.text;
-      t.thinkDirty = true;
+      t.reasonPending += ev.text;
       queueRender();
       break;
     }
@@ -401,10 +434,7 @@ function handle(ev) {
     case "stream_end": {
       if (current) {
         if (current.thinking) {
-          if (current.thinkBody && current.thinkDirty) {
-            current.thinkBody.textContent = current.reasoning;
-            current.thinkDirty = false;
-          }
+          flushThinkPending(current);
           current.thinking.classList.remove("active");
           current.thinking.querySelector("summary").innerHTML =
             `<span class="think-dot"></span>Thought process`;
@@ -754,11 +784,12 @@ function renderSubagentEvent(aid, ev) {
           `<summary><span class="think-dot"></span>Thinking…</summary>` +
           `<div class="thinking-body"></div>`;
         t.thinkBody = t.thinking.querySelector(".thinking-body");
-        t.reasoning = "";
+        t.thinkNode = document.createTextNode("");
+        t.thinkBody.appendChild(t.thinkNode);
         t.wrap.appendChild(t.thinking);
       }
-      t.reasoning += ev.text || "";
-      t.thinkBody.textContent = t.reasoning;
+      // Append-only (O(delta)); deltas already arrive batched from Python.
+      t.thinkNode.appendData(ev.text || "");
       break;
     }
     case "content": {
@@ -775,7 +806,12 @@ function renderSubagentEvent(aid, ev) {
         t.wrap.appendChild(b);
       }
       t.content += ev.text || "";
-      t.contentEl.innerHTML = md(t.content);
+      t.mdDirty = true;
+      // Re-rendering the full markdown per delta for EVERY thread was the
+      // panel's big cost: with 6 parallel sub-agents at most one is visible,
+      // so hidden threads just mark themselves dirty and render lazily on
+      // tab switch (see showActiveSubagentThread).
+      if (!t.wrap.hidden) queueSubagentRender();
       break;
     }
     case "stream_end": {
@@ -783,6 +819,7 @@ function renderSubagentEvent(aid, ev) {
         t.thinking.classList.remove("active");
         t.thinking.querySelector("summary").innerHTML = `<span class="think-dot"></span>Thought process`;
       }
+      renderSubagentMdIfVisible(t);
       break;
     }
     case "tool_call": {
@@ -835,9 +872,36 @@ function renderSubagentEvent(aid, ev) {
   if (aid === activeSubagentId) scrollSubagentPanel();
 }
 
+function renderSubagentMdIfVisible(t) {
+  if (t && t.contentEl && t.mdDirty && !t.wrap.hidden) {
+    t.contentEl.innerHTML = md(t.content);
+    t.mdDirty = false;
+  }
+}
+
+let subagentRenderQueued = false;
+function queueSubagentRender() {
+  if (subagentRenderQueued) return;
+  subagentRenderQueued = true;
+  setTimeout(() => {
+    subagentRenderQueued = false;
+    renderSubagentMdIfVisible(subagentThreads[activeSubagentId]);
+    scrollSubagentPanel();
+  }, 80);
+}
+
+let subPanelPinned = true;
+$("subagent-panel-body").addEventListener("scroll", () => {
+  const b = $("subagent-panel-body");
+  subPanelPinned = b.scrollHeight - b.scrollTop - b.clientHeight < 140;
+}, { passive: true });
+
 function scrollSubagentPanel() {
+  // Same follow-the-stream pinning as the main chat: never yank the user
+  // down while they're scrolled up reading earlier output.
+  if (!subPanelPinned) return;
   const body = $("subagent-panel-body");
-  body.scrollTop = body.scrollHeight;
+  body.scrollTo({ top: body.scrollHeight, behavior: "instant" });
 }
 
 function ensureSubagentTab(aid, name) {
@@ -886,6 +950,9 @@ function showActiveSubagentThread() {
   for (const [aid, t] of Object.entries(subagentThreads)) {
     t.wrap.hidden = aid !== activeSubagentId;
   }
+  // The newly shown thread may have accumulated content while hidden
+  // (hidden threads skip markdown rendering entirely) -- catch it up now.
+  renderSubagentMdIfVisible(subagentThreads[activeSubagentId]);
   $("subagent-tabs").querySelectorAll(".subagent-tab").forEach((tab) => {
     tab.classList.toggle("active", tab.dataset.aid === activeSubagentId);
   });
