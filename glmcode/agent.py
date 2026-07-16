@@ -67,6 +67,7 @@ class _CaptureEvents(AgentEvents):
 
     def __init__(self, forward, aid: str):
         self.text = ""
+        self.last_error = ""  # last error()'d message, for the report fallback
         self._forward = forward
         self._aid = aid
 
@@ -97,6 +98,16 @@ class _CaptureEvents(AgentEvents):
 
     def wrapup_requested(self) -> None:
         self._forward(self._aid, "wrapup_requested")
+
+    def info(self, msg: str) -> None:
+        self._forward(self._aid, "notice", level="info", text=msg)
+
+    def warn(self, msg: str) -> None:
+        self._forward(self._aid, "notice", level="warn", text=msg)
+
+    def error(self, msg: str) -> None:
+        self.last_error = msg
+        self._forward(self._aid, "notice", level="error", text=msg)
 
 
 class Agent:
@@ -752,11 +763,19 @@ class Agent:
         # collide, burning retries/step-budget on 429 backoff instead of
         # actual task progress.
         limiter = RateLimiter()
+        # Unique per CALL, not just per index within it: the frontend's
+        # sub-agent inspector (threads/tabs) is keyed by id and never cleared
+        # between separate spawn_agents calls in the same chat (only on
+        # session switch). Plain "sa1"/"sa2" reused across a second call
+        # would make its live thread/tab reuse -- and get its new stream
+        # events silently appended into -- the first call's already-finished
+        # DOM, showing stale or mixed content instead of the new run.
+        call_id = uuid.uuid4().hex[:6]
 
         def worker(i: int, spec: dict) -> None:
             name = str(spec.get("name") or f"agent-{i + 1}").strip()[:60] or f"agent-{i + 1}"
             task = str(spec.get("task") or "").strip()
-            aid = f"sa{i + 1}"
+            aid = f"sa{call_id}-{i + 1}"
             self._emit_subagent(aid, name, "running", mission=task[:280])
             if not task:
                 results[i] = (name, "", "no task was given")
@@ -814,7 +833,18 @@ class Agent:
             if m.get("role") == "assistant" and isinstance(m.get("content"), str) \
                     and m["content"].strip():
                 return m["content"].strip()
-        return sink.text.strip() or "(sub-agent produced no final report)"
+        if sink.text.strip():
+            return sink.text.strip()
+        # No report by any path means the sub-agent's turn ended without ever
+        # producing text -- almost always because it died early (an ApiError
+        # like a rate-limit, which _run_turn catches and swallows without
+        # appending any assistant message). Previously this returned a bland
+        # placeholder string that the worker then reported as a normal "done"
+        # -- so a sub-agent that actually FAILED showed up as finished-with-
+        # no-report. Raise instead, so the worker marks it an error with the
+        # real reason.
+        raise ToolError(sink.last_error
+                        or "sub-agent ended without producing any output")
 
     # ------------------------------------------------------------------ #
     # Context management
