@@ -8,11 +8,30 @@ from __future__ import annotations
 
 import json
 import os
+import shutil
+import traceback
 from dataclasses import dataclass, field, asdict
+from datetime import datetime, timezone
 from pathlib import Path
 
 _LEGACY_CONFIG_DIR = Path.home() / ".glmcode"
 CONFIG_DIR = Path.home() / ".makenomistakes"
+
+# Deliberately OUTSIDE CONFIG_DIR: if the failure is "can't create/write
+# CONFIG_DIR at all", a note written inside it would never be seen either.
+# This is the only trace a migration failure leaves -- nothing else in the
+# app is set up yet this early (logger.py itself imports config, so it
+# isn't safe to use here without a circular import).
+_MIGRATION_LOG = Path.home() / "makenomistakes-migration-error.log"
+
+
+def _log_migration_failure(exc: Exception) -> None:
+    try:
+        with _MIGRATION_LOG.open("a", encoding="utf-8") as fh:
+            fh.write(f"\n--- {datetime.now(timezone.utc).isoformat()} ---\n")
+            fh.write("".join(traceback.format_exception(exc)))
+    except OSError:
+        pass
 
 
 def migrate_legacy_dir(old: Path | None = None, new: Path | None = None) -> bool:
@@ -21,7 +40,9 @@ def migrate_legacy_dir(old: Path | None = None, new: Path | None = None) -> bool
     Runs at import time, before any module touches CONFIG_DIR (logger.py
     mkdirs it on import, and everything imports config first). Never
     clobbers an existing new dir, never follows a symlinked old one, and
-    never raises -- worst case the app just starts with a fresh dir.
+    never raises -- worst case the app starts with a fresh dir (a failure
+    is logged to _MIGRATION_LOG, since a silent one would mean losing
+    sessions/backups/memory/API key/background with no trace at all).
     """
     old = old if old is not None else _LEGACY_CONFIG_DIR
     new = new if new is not None else CONFIG_DIR
@@ -30,14 +51,26 @@ def migrate_legacy_dir(old: Path | None = None, new: Path | None = None) -> bool
             return False
         try:
             old.rename(new)
+            return True
         except OSError:
-            # e.g. a file inside is locked by another process on Windows:
-            # fall back to copying (leaves the old dir behind, but the app
-            # keeps all its sessions/backups/memory).
-            import shutil
-            shutil.copytree(old, new)
-        return True
-    except Exception:
+            pass  # e.g. a file inside is locked by another process on Windows
+        # Fall back to copying, staged in a temp sibling dir first: copytree
+        # partway through a failure would otherwise leave `new` half
+        # populated, and the NEXT launch's `new.exists()` check above would
+        # then mistake that for "already migrated" and skip forever,
+        # permanently orphaning whatever didn't get copied.
+        staging = new.with_name(new.name + ".migrating")
+        shutil.rmtree(staging, ignore_errors=True)
+        try:
+            shutil.copytree(old, staging)
+            staging.rename(new)
+            return True
+        except Exception as e:
+            shutil.rmtree(staging, ignore_errors=True)
+            _log_migration_failure(e)
+            return False
+    except Exception as e:
+        _log_migration_failure(e)
         return False
 
 

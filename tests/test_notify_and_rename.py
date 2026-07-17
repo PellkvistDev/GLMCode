@@ -3,6 +3,7 @@
 
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -48,6 +49,59 @@ def test_migration_noop_without_legacy_dir(tmp_path):
     assert config.migrate_legacy_dir(
         tmp_path / ".glmcode", tmp_path / ".makenomistakes") is False
     assert not (tmp_path / ".makenomistakes").exists()
+
+
+def test_migration_falls_back_to_copy_when_rename_fails(tmp_path, monkeypatch):
+    old, new = tmp_path / ".glmcode", tmp_path / ".makenomistakes"
+    (old / "sessions").mkdir(parents=True)
+    (old / "sessions" / "a.json").write_text("{}", encoding="utf-8")
+    real_rename = config.Path.rename
+
+    def fail_rename_from_old(self, target):
+        # only the direct old->new rename fails (simulating a locked file);
+        # the staging->new rename inside the copy fallback must still work.
+        if self == old:
+            raise OSError("simulated: file in use")
+        return real_rename(self, target)
+
+    monkeypatch.setattr(config.Path, "rename", fail_rename_from_old)
+    assert config.migrate_legacy_dir(old, new) is True
+    assert (new / "sessions" / "a.json").exists()
+    # the old dir is left behind on the copy path (rename couldn't remove it)
+    assert old.exists()
+    # no leftover staging dir
+    assert not new.with_name(new.name + ".migrating").exists()
+
+
+def test_migration_partial_copy_failure_does_not_permanently_orphan_data(
+        tmp_path, monkeypatch):
+    """A copytree that dies partway through must NOT leave a half-populated
+    `new` dir -- a future launch's `new.exists()` check would mistake that
+    for 'already migrated' and skip the rest forever."""
+    old, new = tmp_path / ".glmcode", tmp_path / ".makenomistakes"
+    (old / "sessions").mkdir(parents=True)
+    (old / "sessions" / "a.json").write_text("{}", encoding="utf-8")
+    (old / "memory.md").write_text("important", encoding="utf-8")
+    monkeypatch.setattr(config, "_MIGRATION_LOG", tmp_path / "migration-error.log")
+
+    def fail_rename(self, target):
+        raise OSError("simulated: file in use")
+
+    def fail_copytree(src, dst, **kwargs):
+        Path(dst).mkdir(parents=True, exist_ok=True)
+        (Path(dst) / "sessions").mkdir(exist_ok=True)  # partial progress...
+        raise OSError("simulated: disk error mid-copy")
+
+    monkeypatch.setattr(config.Path, "rename", fail_rename)
+    monkeypatch.setattr(config.shutil, "copytree", fail_copytree)
+
+    assert config.migrate_legacy_dir(old, new) is False
+    assert not new.exists()  # cleaned up, not left half-populated
+    assert not new.with_name(new.name + ".migrating").exists()
+    assert (old / "memory.md").exists()  # original data untouched
+    # the failure was recorded somewhere, not swallowed in total silence
+    assert config._MIGRATION_LOG.exists()
+    assert "disk error mid-copy" in config._MIGRATION_LOG.read_text()
 
 
 # -- notification commands ------------------------------------------------ #

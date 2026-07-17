@@ -87,3 +87,28 @@ def test_default_excludes_skip_heavy_dirs(project):
     # node_modules was excluded from the snapshot -- revert must not
     # resurrect it.
     assert not (project / "node_modules").exists()
+
+
+def test_run_suppresses_console_window(project, monkeypatch):
+    """Every git call goes through subprocess.run under pythonw (no console
+    of its own), so it must always carry NO_WINDOW_KWARGS -- otherwise each
+    one flashes a black console window on Windows. Regression test for a
+    real bug: snapshot() runs before EVERY turn, so a missing flag here
+    means a window flash on every single message sent.
+
+    NO_WINDOW_KWARGS is only non-empty on win32 (see tools.py), so on this
+    (Linux) test runner it's normally {} and the flag wouldn't actually be
+    exercised -- force a sentinel value so the assertion is meaningful on
+    every platform CI runs on."""
+    monkeypatch.setattr(backup, "NO_WINDOW_KWARGS", {"creationflags": 0x08000000})
+    seen_kwargs = {}
+    real_run = backup.subprocess.run
+
+    def spy(*args, **kwargs):
+        seen_kwargs.update(kwargs)
+        return real_run(*args, **{k: v for k, v in kwargs.items() if k != "creationflags"})
+
+    monkeypatch.setattr(backup.subprocess, "run", spy)
+    repo = backup.BackupRepo("sess-5", project)
+    repo.snapshot("msg")
+    assert seen_kwargs.get("creationflags") == 0x08000000

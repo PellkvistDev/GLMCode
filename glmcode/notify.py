@@ -14,6 +14,8 @@ import subprocess
 import sys
 import threading
 
+from .tools import NO_WINDOW_KWARGS
+
 APP_NAME = "Make No Mistakes"
 
 # Showing a toast on Windows requires a registered AppUserModelID; using
@@ -67,10 +69,7 @@ def _command(title: str, body: str, platform: str | None = None) -> list[str]:
 
 def _run(cmd: list[str]) -> None:
     try:
-        kwargs = {}
-        if sys.platform.startswith("win"):
-            kwargs["creationflags"] = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        subprocess.run(cmd, capture_output=True, timeout=15, **kwargs)
+        subprocess.run(cmd, capture_output=True, timeout=15, **NO_WINDOW_KWARGS)
     except Exception:
         pass
 

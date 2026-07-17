@@ -15,6 +15,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .config import CONFIG_DIR
+from .tools import NO_WINDOW_KWARGS
 
 BACKUPS_DIR = CONFIG_DIR / "backups"
 
@@ -52,6 +53,7 @@ class BackupRepo:
         return subprocess.run(
             ["git", f"--git-dir={self.git_dir}", f"--work-tree={self.project_dir}", *args],
             capture_output=True, encoding="utf-8", errors="replace", check=check,
+            **NO_WINDOW_KWARGS,
         )
 
     def _initialized(self) -> bool:
