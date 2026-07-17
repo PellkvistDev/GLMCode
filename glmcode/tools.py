@@ -14,6 +14,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import subprocess
 import sys
 import threading
@@ -125,6 +126,59 @@ def read_file(path: str, offset: int = 1, limit: int = MAX_READ_LINES) -> str:
 
 
 # --------------------------------------------------------------------- #
+# post-write syntax verification
+#
+# A small model's most common failure mode is a broken edit it never
+# notices. Checking the file right inside the write/edit tool result turns
+# silent breakage into immediate, actionable feedback in the SAME round
+# trip -- no extra API call, no reliance on the model remembering to verify.
+
+_MAX_CHECK_BYTES = 512_000  # don't compile-check huge generated files
+
+
+def _syntax_feedback(p: Path) -> str:
+    """Best-effort syntax check of a just-written file. Returns '' when fine
+    (or uncheckable); otherwise a WARNING line for the tool result. Must
+    never raise -- a broken checker must not break the write itself."""
+    try:
+        if p.stat().st_size > _MAX_CHECK_BYTES:
+            return ""
+        ext = p.suffix.lower()
+        if ext == ".py":
+            try:
+                compile(p.read_text(encoding="utf-8", errors="replace"), str(p), "exec")
+            except SyntaxError as e:
+                return _syntax_warn(f"Python syntax error at line {e.lineno}: {e.msg}")
+        elif ext == ".json":
+            try:
+                json.loads(p.read_text(encoding="utf-8", errors="replace"))
+            except json.JSONDecodeError as e:
+                return _syntax_warn(f"invalid JSON: {e}")
+        elif ext == ".toml":
+            import tomllib
+            try:
+                tomllib.loads(p.read_text(encoding="utf-8", errors="replace"))
+            except tomllib.TOMLDecodeError as e:
+                return _syntax_warn(f"invalid TOML: {e}")
+        elif ext in (".js", ".mjs", ".cjs"):
+            node = shutil.which("node")
+            if node:
+                r = subprocess.run([node, "--check", str(p)], capture_output=True,
+                                   text=True, timeout=10, **NO_WINDOW_KWARGS)
+                if r.returncode != 0:
+                    err = " ".join((r.stderr or "").strip().splitlines()[:3])[:300]
+                    return _syntax_warn(f"JavaScript syntax error: {err}")
+    except Exception:
+        return ""
+    return ""
+
+
+def _syntax_warn(msg: str) -> str:
+    return (f"\nWARNING: {msg}. The file was saved anyway, but it will not "
+            f"run/parse in this state -- fix this before moving on.")
+
+
+# --------------------------------------------------------------------- #
 # write_file
 
 def write_file(path: str, content: str) -> str:
@@ -133,7 +187,7 @@ def write_file(path: str, content: str) -> str:
     p.parent.mkdir(parents=True, exist_ok=True)
     p.write_text(content, encoding="utf-8", newline="\n")
     verb = "Overwrote" if existed else "Created"
-    return f"{verb} {p} ({len(content.splitlines())} lines)."
+    return f"{verb} {p} ({len(content.splitlines())} lines).{_syntax_feedback(p)}"
 
 
 # --------------------------------------------------------------------- #
@@ -168,7 +222,7 @@ def edit_file(path: str, old_string: str, new_string: str, replace_all: bool = F
         else text.replace(old_string, new_string, 1)
     p.write_text(new_text, encoding="utf-8", newline="\n")
     n = count if replace_all else 1
-    return f"Edited {p} ({n} replacement{'s' if n != 1 else ''})."
+    return f"Edited {p} ({n} replacement{'s' if n != 1 else ''}).{_syntax_feedback(p)}"
 
 
 # --------------------------------------------------------------------- #

@@ -36,13 +36,86 @@ function esc(s) {
     .replace(/>/g, "&gt;").replace(/"/g, "&quot;");
 }
 
+/* ------------------------------------------------ syntax highlighting
+   Dependency-free: comments/strings are matched per language family, then
+   keywords/numbers are picked out of the plain segments. Everything is
+   escaped piece-by-piece as it's emitted (never regexed after escaping, so
+   entities like &quot; can't get mangled). Unknown languages fall back to
+   strings+numbers only -- safe for logs and shell output. */
+
+const HL_KEYWORDS = {
+  c: new Set(("break case catch class const continue debugger default delete do else enum export extends " +
+    "finally fn for func function if impl implements import in instanceof interface let loop match mod new " +
+    "of package private public pub return static struct super switch this throw trait try type typeof use " +
+    "var void while with yield async await true false null undefined nil None").split(" ")),
+  py: new Set(("and as assert async await break class continue def del elif else except finally for from " +
+    "global if import in is lambda nonlocal not or pass raise return try while with yield " +
+    "True False None self match case").split(" ")),
+  sh: new Set(("if then else elif fi for while do done case esac function return local export echo " +
+    "set in break continue exit param begin process end foreach").split(" ")),
+};
+// [comment/string style, keyword set] per language; style keys below.
+const HL_LANGS = {
+  python: ["py", "py"], py: ["py", "py"],
+  javascript: ["c", "c"], js: ["c", "c"], jsx: ["c", "c"], ts: ["c", "c"], tsx: ["c", "c"],
+  typescript: ["c", "c"], java: ["c", "c"], c: ["c", "c"], cpp: ["c", "c"], h: ["c", "c"],
+  cs: ["c", "c"], go: ["c", "c"], rs: ["c", "c"], rust: ["c", "c"], kt: ["c", "c"],
+  swift: ["c", "c"], php: ["c", "c"], css: ["c", null], scss: ["c", null],
+  sh: ["hash", "sh"], bash: ["hash", "sh"], zsh: ["hash", "sh"], shell: ["hash", "sh"],
+  powershell: ["hash", "sh"], ps1: ["hash", "sh"], yaml: ["hash", null], yml: ["hash", null],
+  toml: ["hash", null], ruby: ["hash", "py"], rb: ["hash", "py"],
+  html: ["html", null], xml: ["html", null], json: ["none", null],
+};
+const HL_TOKEN_RES = {
+  c: /(\/\*[\s\S]*?(?:\*\/|$)|\/\/[^\n]*|`(?:\\[\s\S]|[^\\`])*`?|"(?:\\.|[^"\\\n])*"?|'(?:\\.|[^'\\\n])*'?)/,
+  hash: /(#[^\n]*|"(?:\\.|[^"\\\n])*"?|'(?:\\.|[^'\\\n])*'?)/,
+  py: /("""[\s\S]*?(?:"""|$)|'''[\s\S]*?(?:'''|$)|#[^\n]*|"(?:\\.|[^"\\\n])*"?|'(?:\\.|[^'\\\n])*'?)/,
+  html: /(<!--[\s\S]*?(?:-->|$)|"(?:\\.|[^"\\\n])*"?|'(?:\\.|[^'\\\n])*'?)/,
+  none: /("(?:\\.|[^"\\\n])*"?|'(?:\\.|[^'\\\n])*'?)/,
+};
+
+function hlPlain(seg, kwset) {
+  let out = "";
+  let last = 0;
+  const re = /[A-Za-z_$][\w$]*|\d[\d_]*(?:\.\d+)?/g;
+  let m;
+  while ((m = re.exec(seg))) {
+    out += esc(seg.slice(last, m.index));
+    const t = m[0];
+    if (kwset && kwset.has(t)) out += `<span class="hl-kw">${t}</span>`;
+    else if (/^\d/.test(t)) out += `<span class="hl-num">${t}</span>`;
+    else out += esc(t);
+    last = m.index + t.length;
+  }
+  return out + esc(seg.slice(last));
+}
+
+function highlight(code, lang) {
+  const [style, kwName] = HL_LANGS[(lang || "").toLowerCase()] || ["none", null];
+  const kwset = kwName ? HL_KEYWORDS[kwName] : null;
+  const re = new RegExp(HL_TOKEN_RES[style].source, "g");
+  let out = "";
+  let last = 0;
+  let m;
+  while ((m = re.exec(code))) {
+    out += hlPlain(code.slice(last, m.index), kwset);
+    const t = m[0];
+    const isComment = t.startsWith("//") || t.startsWith("/*")
+      || t.startsWith("#") || t.startsWith("<!--");
+    out += `<span class="${isComment ? "hl-com" : "hl-str"}">${esc(t)}</span>`;
+    last = m.index + t.length;
+    if (m.index === re.lastIndex) re.lastIndex++; // never stall on empty match
+  }
+  return out + hlPlain(code.slice(last), kwset);
+}
+
 /* Minimal markdown renderer (safe: escapes first, then adds structure). */
 function md(src) {
   const codeBlocks = [];
   src = String(src ?? "");
   // fenced code blocks out first
   src = src.replace(/```([\w+-]*)\n?([\s\S]*?)(?:```|$)/g, (_, lang, code) => {
-    codeBlocks.push(`<pre><code data-lang="${esc(lang)}">${esc(code.replace(/\n$/, ""))}</code></pre>`);
+    codeBlocks.push(`<pre><code data-lang="${esc(lang)}">${highlight(code.replace(/\n$/, ""), lang)}</code></pre>`);
     return `\u0000${codeBlocks.length - 1}\u0000`;
   });
   src = esc(src);

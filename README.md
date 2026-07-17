@@ -14,6 +14,12 @@ files, searches your codebase, runs PowerShell commands, keeps a todo list,
 searches the web and fetches docs, and asks for your permission before doing
 anything destructive (unless you put it in auto mode).
 
+The agent gets quality-multiplying scaffolding a small free model needs:
+every file edit is **syntax-checked immediately** (Python/JSON/TOML/JS) with
+errors surfaced in the same tool result, and each chat starts with a compact
+**project layout map** in the system prompt so it navigates without burning
+tool calls on exploration.
+
 ## Setup (once)
 
 > **Run every command below in PowerShell, not the old Command Prompt (cmd).**

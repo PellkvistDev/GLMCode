@@ -105,6 +105,48 @@ def _git_info(cwd: Path) -> str:
         return "Is a git repository: unknown"
 
 
+def _project_map(cwd: Path, max_depth: int = 2, per_dir: int = 15,
+                 max_entries: int = 60) -> str:
+    """A compact top-levels file tree for the system prompt, so the model
+    starts every chat already knowing the project layout instead of burning
+    3-5 exploratory tool calls (each a full round trip on a ~1 req/s rate-
+    limited API) before doing any real work. Advisory only -- it can go
+    stale mid-session, so the note says to trust list_dir/glob over it."""
+    from .tools import DEFAULT_IGNORES
+    lines: list[str] = []
+    skipped = 0
+
+    def walk(d: Path, depth: int) -> None:
+        nonlocal skipped
+        try:
+            entries = sorted(d.iterdir(),
+                             key=lambda e: (not e.is_dir(), e.name.lower()))
+        except OSError:
+            return
+        shown = 0
+        for e in entries:
+            hidden = e.name.startswith(".")
+            if e.name in DEFAULT_IGNORES or hidden or e.is_symlink():
+                continue
+            if shown >= per_dir or len(lines) >= max_entries:
+                skipped += 1
+                continue
+            shown += 1
+            lines.append("  " * depth + e.name + ("/" if e.is_dir() else ""))
+            if e.is_dir() and depth + 1 < max_depth:
+                walk(e, depth + 1)
+
+    walk(cwd, 0)
+    if not lines:
+        return ""
+    if skipped:
+        lines.append(f"(+{skipped} more entries not shown)")
+    return ("\n\n# Project layout\n"
+            "Top levels of the working directory (snapshot from session "
+            "start -- may be stale or truncated; trust list_dir/glob over "
+            "this):\n" + "\n".join(lines))
+
+
 def _user_memory() -> str:
     """User-level memory (~/.glmcode/memory.md), unlike _project_memory:
     applies to every project, every chat -- durable facts/preferences the
@@ -151,7 +193,8 @@ def build_system_prompt(cwd: Path | None = None, model: str = "") -> str:
         f"Model: {model}\n"
         f"{_git_info(cwd)}"
     )
-    return SYSTEM_PROMPT + env + _user_memory() + _project_memory(cwd)
+    return (SYSTEM_PROMPT + env + _project_map(cwd) + _user_memory()
+            + _project_memory(cwd))
 
 
 VISION_ANALYSIS_PROMPT = """You are the vision module of a coding agent. The user attached the image(s) shown, in the context of this request to the coding agent:
