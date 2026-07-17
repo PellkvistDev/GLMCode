@@ -3,7 +3,7 @@ the whole point -- still intact after compaction wipes the live context."""
 
 import json
 
-from glmcode.transcript import Transcript
+from glmcode.transcript import Transcript, search_sessions
 
 from conftest import FakeResult, tool_call
 
@@ -98,6 +98,60 @@ def test_system_prompt_advertises_transcript(scripted_agent, tmp_path):
     sp = agent.messages[0]["content"]
     assert "Conversation transcripts" in sp
     assert str(agent.transcript.path) in sp
+
+
+def test_compact_summary_names_transcript_path(scripted_agent, tmp_path):
+    agent = scripted_agent(lambda n: FakeResult(content=f"answer {n}"))
+    agent.transcript = make_transcript(tmp_path)
+    agent.run_turn({"role": "user", "content": "first"})
+    agent.run_turn({"role": "user", "content": "second"})
+    agent.compact()
+    # The post-compaction context tells the model exactly where the lost
+    # details live.
+    assert str(agent.transcript.path) in agent.messages[1]["content"]
+
+
+def test_set_title_written_once(tmp_path):
+    t = make_transcript(tmp_path)
+    t.user("hello")
+    t.set_title("Fixing The Login Bug")
+    assert "Title: Fixing The Login Bug" in t.path.read_text(encoding="utf-8")
+
+
+def test_search_matches_transcript_content(tmp_path):
+    t1 = Transcript("chat-1", root=tmp_path)
+    t1.user("we discussed the kubernetes ingress config here")
+    t2 = Transcript("chat-2", root=tmp_path)
+    t2.user("this chat is about css grid layouts")
+    sessions = [
+        {"id": "chat-1", "title": "Infra work", "cwd": "/a", "updated": "1"},
+        {"id": "chat-2", "title": "Frontend", "cwd": "/b", "updated": "2"},
+        {"id": "chat-3", "title": "No transcript here", "cwd": "/c", "updated": "3"},
+    ]
+    hits = search_sessions(sessions, "kubernetes", root=tmp_path)
+    assert [h["id"] for h in hits] == ["chat-1"]
+    assert "kubernetes ingress" in hits[0]["snippet"]
+
+
+def test_search_matches_title_even_without_transcript(tmp_path):
+    sessions = [{"id": "chat-3", "title": "Rust rewrite plan", "cwd": "/c", "updated": "3"}]
+    hits = search_sessions(sessions, "rust", root=tmp_path)
+    assert len(hits) == 1
+
+
+def test_search_empty_query_returns_everything(tmp_path):
+    sessions = [{"id": "a", "title": "x", "cwd": "", "updated": ""}]
+    assert search_sessions(sessions, "  ", root=tmp_path) == sessions
+
+
+def test_search_long_line_snippet_centers_match(tmp_path):
+    t = Transcript("chat-long", root=tmp_path)
+    t.user("padding " * 60 + "NEEDLE9000 " + "trailing " * 40)
+    sessions = [{"id": "chat-long", "title": "t", "cwd": "", "updated": ""}]
+    hits = search_sessions(sessions, "needle9000", root=tmp_path)
+    assert len(hits) == 1
+    assert "NEEDLE9000" in hits[0]["snippet"]
+    assert len(hits[0]["snippet"]) < 200
 
 
 def test_steering_logged_with_label(scripted_agent, tmp_path):

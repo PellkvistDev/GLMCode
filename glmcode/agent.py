@@ -938,10 +938,17 @@ class Agent:
             self.transcript.marker(
                 "Context compacted here -- everything above this line is no "
                 "longer in the model's context (this transcript keeps it all)")
+        # A summary is lossy by definition -- when a transcript exists, tell
+        # the model exactly where the details it just lost can be found.
+        details_note = ""
+        if self.transcript:
+            details_note = (f"\n\n[The FULL pre-compaction conversation is preserved at "
+                            f"{self.transcript.path} -- grep/read it if you need any "
+                            f"detail this summary leaves out.]")
         self.messages = [self.messages[0], {
             "role": "user",
             "content": ("[Context was compacted. Summary of the session so far:]\n\n"
-                        + summary +
+                        + summary + details_note +
                         "\n\n[Continue helping the user from this state.]"),
         }, {
             "role": "assistant",

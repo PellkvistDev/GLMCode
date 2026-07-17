@@ -65,6 +65,13 @@ class Transcript:
         """An out-of-band note, e.g. 'context was compacted here'."""
         self._append(f"\n---\n*{text}*\n")
 
+    def set_title(self, title: str) -> None:
+        """Record the chat's (AI-generated) title so both the sidebar search
+        and the model's own grepping can find this file by topic."""
+        title = (title or "").strip()
+        if title:
+            self._append(f"\nTitle: {title}\n")
+
     # ------------------------------------------------------------------ #
 
     def prompt_note(self) -> str:
@@ -101,3 +108,45 @@ class Transcript:
                 f.write(text)
         except OSError:
             pass
+
+
+# --------------------------------------------------------------------- #
+# Full-text search across every chat's transcript (sidebar search).
+
+_SNIPPET_LEN = 150
+
+
+def search_sessions(sessions: list, query: str, root: Path | None = None) -> list:
+    """Filter a session list (as returned by SessionStore.list) to those
+    whose title or transcript contains `query`, case-insensitively. Each hit
+    gains a "snippet" key: the matching transcript line, trimmed around the
+    match. Sessions from before transcripts existed still match by title."""
+    root = root or TRANSCRIPTS_DIR
+    q = (query or "").strip().lower()
+    if not q:
+        return sessions
+    out = []
+    for s in sessions:
+        title = s.get("title", "")
+        if q in title.lower():
+            out.append({**s, "snippet": ""})  # title match needs no snippet
+            continue
+        path = root / f"{_safe(s.get('id', ''))}.md"
+        if not path.exists():
+            continue
+        try:
+            text = path.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        i = text.lower().find(q)
+        if i < 0:
+            continue
+        start = text.rfind("\n", 0, i) + 1
+        end = text.find("\n", i)
+        line = text[start:end if end != -1 else len(text)].strip()
+        if len(line) > _SNIPPET_LEN:
+            # keep the match visible: trim around it, not just the line head
+            at = max(0, (i - start) - _SNIPPET_LEN // 3)
+            line = ("…" if at else "") + line[at:at + _SNIPPET_LEN] + "…"
+        out.append({**s, "snippet": line})
+    return out

@@ -30,7 +30,7 @@ from ..config import CONFIG_DIR, PERMISSION_MODES, Config, load_config, save_con
 from ..events import AgentEvents
 from ..prompts import TITLE_PROMPT
 from ..sessions import SessionStore, new_id, to_display
-from ..transcript import Transcript
+from ..transcript import Transcript, search_sessions
 from ..tools import configure_search, get_todos, restore_todos
 from ..permissions import add_command_aliases
 
@@ -657,6 +657,11 @@ class Api:
     def list_sessions(self):
         return self._store.list()
 
+    def search_chats(self, query: str):
+        """Sidebar full-text search: matches chat titles and the full
+        transcripts (which keep even compacted-away conversation)."""
+        return {"sessions": search_sessions(self._store.list(), query)}
+
     def _activate_session(self, sid: str, messages: list, cwd: str,
                           prompt_tokens: int, completion_tokens: int,
                           todos: list, title: str = "", auto_backup: bool = True) -> dict:
@@ -883,6 +888,9 @@ class Api:
                 t = self._generate_title(text)
                 if t:
                     self.session_title = t
+                    if self._agent.transcript:
+                        # searchable by topic, not just by session id
+                        self._agent.transcript.set_title(t)
             self._save_current()  # persist now so the returned sidebar is current
             u = self._agent.session_usage
             return {"ok": True, "prompt_tokens": u.prompt_tokens,

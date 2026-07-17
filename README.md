@@ -222,7 +222,14 @@ transcript (`~/.glmcode/transcripts/`, one file per chat) — including
 everything that compaction later summarizes away. The agent is told where
 these live, so it can grep them itself: ask about something from earlier
 that's no longer in its context — or from a *previous chat entirely* — and
-it looks it up instead of guessing. Deleting a chat deletes its transcript.
+it looks it up instead of guessing. When a conversation is compacted, the
+summary explicitly names the transcript file the details went to. Deleting
+a chat deletes its transcript.
+
+The sidebar's **search box** uses the same transcripts: it searches full
+conversation text across every chat (not just titles), showing the matching
+line under each hit — so "which chat was the ingress fix in?" is one search
+away, even if that conversation was compacted long ago.
 
 ### Permission modes
 

@@ -958,6 +958,16 @@ body.sidebar-open #sidebar { transform: translateX(0); }
 .new-chat-btn:hover { background: rgba(255, 255, 255, 0.16); border-color: rgba(255, 255, 255, 0.28); }
 .new-chat-btn:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
 
+.chat-search {
+  flex: none; margin: 8px 0 6px;
+  font-family: var(--font); font-size: 12.5px; color: var(--text);
+  background: rgba(6, 9, 18, 0.5); border: 1px solid var(--stroke-soft);
+  border-radius: var(--r-sm); padding: 8px 11px; outline: none;
+  transition: border-color 0.2s ease;
+}
+.chat-search::placeholder { color: var(--text-faint); }
+.chat-search:focus { border-color: var(--accent); }
+
 .session-list {
   flex: 1; overflow-y: auto; overflow-x: hidden;
   display: flex; flex-direction: column; gap: 2px;
@@ -989,6 +999,11 @@ body.sidebar-open #sidebar { transform: translateX(0); }
   font-size: 10.8px; color: var(--text-faint); margin-top: 2px;
   white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   font-family: var(--mono);
+}
+.sess-snippet {
+  font-size: 11px; color: var(--text-dim); margin-top: 3px;
+  white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  font-style: italic;
 }
 .sess-del {
   flex: none; width: 24px; height: 24px; border-radius: 7px;

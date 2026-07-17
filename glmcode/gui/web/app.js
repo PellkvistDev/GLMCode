@@ -1574,22 +1574,32 @@ function timeAgo(iso) {
 
 const TRASH_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><path d="M10 11v6"/><path d="M14 11v6"/><path d="M9 6V4a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2"/></svg>';
 
+// When non-null, the sidebar shows these search results instead of the full
+// session list (kept canonical in `sessions` -- renders during an active
+// search must not stomp the filtered view).
+let searchResults = null;
+
 function renderSidebar() {
   const list = $("session-list");
-  if (!sessions.length) {
-    list.innerHTML = '<div class="session-empty">No chats yet.<br>Click "New Chat" to pick a project folder and start.</div>';
+  const items = searchResults ?? sessions;
+  if (!items.length) {
+    list.innerHTML = searchResults
+      ? '<div class="session-empty">No chats match.</div>'
+      : '<div class="session-empty">No chats yet.<br>Click "New Chat" to pick a project folder and start.</div>';
     return;
   }
   list.innerHTML = "";
-  for (const s of sessions) {
+  for (const s of items) {
     const row = document.createElement("div");
     row.className = "sess-row" + (s.id === activeSessionId ? " active" : "");
     row.tabIndex = 0;
     row.setAttribute("role", "button");
     row.title = s.cwd;
+    const snippet = s.snippet
+      ? `<div class="sess-snippet">${esc(s.snippet)}</div>` : "";
     row.innerHTML =
       `<div class="sess-main"><div class="sess-title">${esc(s.title || "New chat")}</div>` +
-      `<div class="sess-sub">${esc(basename(s.cwd))} · ${esc(timeAgo(s.updated))}</div></div>` +
+      `<div class="sess-sub">${esc(basename(s.cwd))} · ${esc(timeAgo(s.updated))}</div>${snippet}</div>` +
       `<button class="sess-del" aria-label="Delete chat: ${esc(s.title || "New chat")}">${TRASH_ICON}</button>`;
     row.addEventListener("click", (e) => {
       if (e.target.closest(".sess-del") || s.id === activeSessionId) return;
@@ -1608,6 +1618,40 @@ function renderSidebar() {
     list.appendChild(row);
   }
 }
+
+// Full-text chat search: matches titles AND the persistent transcripts, so
+// it finds conversation content even from chats whose context was long since
+// compacted away. Debounced; a sequence counter drops stale async responses
+// so fast typing can't render an older query's results over a newer one's.
+let searchSeq = 0;
+let searchTimer = null;
+$("chat-search").addEventListener("input", () => {
+  clearTimeout(searchTimer);
+  const q = $("chat-search").value.trim();
+  searchTimer = setTimeout(async () => {
+    const seq = ++searchSeq;
+    if (!q) {
+      searchResults = null;
+      renderSidebar();
+      return;
+    }
+    try {
+      const res = await api().search_chats(q);
+      if (seq !== searchSeq) return; // a newer query superseded this one
+      searchResults = (res && res.sessions) || [];
+      renderSidebar();
+    } catch (e) {
+      toast("Search failed: " + e, "error", 5000);
+    }
+  }, 220);
+});
+$("chat-search").addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    $("chat-search").value = "";
+    searchResults = null;
+    renderSidebar();
+  }
+});
 
 function setSidebar(open) {
   document.body.classList.toggle("sidebar-open", open);
