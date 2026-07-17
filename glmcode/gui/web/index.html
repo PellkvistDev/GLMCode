@@ -30,6 +30,13 @@
     <span id="tb-cwd" class="tb-cwd" title=""></span>
   </div>
   <div class="tb-right">
+    <div id="model-select-wrap" class="model-select-wrap">
+      <button id="model-chip" class="chip chip-btn model-chip" aria-haspopup="listbox" aria-expanded="false" title="Model for this chat — click to switch">
+        <span id="model-chip-label">glm-4.7-flash</span>
+        <svg class="model-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"/></svg>
+      </button>
+      <div id="model-menu" class="model-menu" role="listbox" hidden></div>
+    </div>
     <span id="usage-chip" class="chip" title="Model output tokens this chat (always free)">0 tok</span>
     <button id="read-aloud-chip" class="icon-btn" aria-label="Read replies aloud" aria-pressed="false" title="Read replies aloud (off)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">

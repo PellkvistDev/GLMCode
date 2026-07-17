@@ -1363,6 +1363,11 @@ function setBusy(b) {
   sendBtn.disabled = false;
   sendBtn.classList.toggle("steer-mode", b);
   sendBtn.title = b ? "Steer: send without interrupting the agent" : "Send";
+  // Model can't change mid-turn (the backend refuses too) -- reflect that on
+  // the top selector and never leave its menu open across a turn start.
+  const mc = $("model-chip");
+  if (mc) mc.disabled = b;
+  if (b) closeModelMenu();
   if (!b) clearSteerQueued();
 }
 
@@ -1741,7 +1746,99 @@ async function populateModelPicker(data) {
   providersCache = res;
   renderApiList(res);
   refreshModelFoot(res);
+  renderModelChip(res);
+  buildModelMenu(res);
 }
+
+/* ---- top-of-chat model selector: one flat list of every model ---------- */
+// Each configured model is its own equal entry -- no grouping by provider.
+// The built-in z.ai row contributes only its chat model (its vision model
+// routes automatically and isn't a chat choice); custom APIs contribute
+// every model they list.
+function modelEntries(res) {
+  const out = [];
+  for (const p of res.providers || []) {
+    const models = p.builtin ? (p.models || []).slice(0, 1) : (p.models || []);
+    for (const m of models) out.push({ provider: p.name, model: m, builtin: !!p.builtin });
+  }
+  return out;
+}
+
+function renderModelChip(res) {
+  $("model-chip-label").textContent = res.chat_model || "model";
+  $("model-chip").title = `Model: ${res.chat_model} (via ${res.chat_provider}) — click to switch`;
+}
+
+const CHECK_SVG = '<svg class="model-opt-check" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+
+function buildModelMenu(res) {
+  const menu = $("model-menu");
+  menu.innerHTML = "";
+  const entries = modelEntries(res);
+  if (!entries.length) {
+    menu.innerHTML = '<div class="model-menu-empty">No models configured.</div>';
+  }
+  for (const e of entries) {
+    const selected = e.provider === res.chat_provider && e.model === res.chat_model;
+    const opt = document.createElement("button");
+    opt.className = "model-opt" + (selected ? " selected" : "");
+    opt.setAttribute("role", "option");
+    opt.setAttribute("aria-selected", String(selected));
+    opt.innerHTML = CHECK_SVG +
+      `<span class="model-opt-text"><span class="model-opt-name"></span>` +
+      `<span class="model-opt-prov"></span></span>`;
+    opt.querySelector(".model-opt-name").textContent = e.model;
+    opt.querySelector(".model-opt-prov").textContent = e.provider;
+    opt.addEventListener("click", () => selectModel(e));
+    menu.appendChild(opt);
+  }
+  // A quick path to configure more, since this menu is where you'd look.
+  const foot = document.createElement("div");
+  foot.className = "model-menu-foot";
+  foot.innerHTML = '<button class="model-menu-add">+ Add or manage APIs…</button>';
+  foot.querySelector("button").addEventListener("click", () => {
+    closeModelMenu();
+    openSettingsToApis();
+  });
+  menu.appendChild(foot);
+}
+
+function openModelMenu() {
+  if (busy) return;  // model can't change mid-turn
+  $("model-menu").hidden = false;
+  $("model-chip").setAttribute("aria-expanded", "true");
+}
+function closeModelMenu() {
+  $("model-menu").hidden = true;
+  $("model-chip").setAttribute("aria-expanded", "false");
+}
+function toggleModelMenu() {
+  $("model-menu").hidden ? openModelMenu() : closeModelMenu();
+}
+
+async function selectModel(entry) {
+  closeModelMenu();
+  const res = await api().set_chat_model(entry.provider, entry.builtin ? "" : entry.model);
+  if (res && res.error) { toast(res.error, "error", 5000); return; }
+  populateModelPicker(res);
+  toast(`This chat now uses ${res.chat_model}.`, "info", 2000);
+}
+
+function openSettingsToApis() {
+  $("settings-btn").click();
+  setTimeout(() => {
+    const el = $("api-list");
+    if (el) el.scrollIntoView({ behavior: "smooth", block: "center" });
+  }, 60);
+}
+
+$("model-chip").addEventListener("click", (e) => { e.stopPropagation(); toggleModelMenu(); });
+document.addEventListener("click", (e) => {
+  if (!$("model-menu").hidden && !$("model-select-wrap").contains(e.target)) closeModelMenu();
+});
+document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape" && !$("model-menu").hidden) closeModelMenu();
+});
 
 async function selectApi(p, model) {
   const res = await api().set_chat_model(

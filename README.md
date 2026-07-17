@@ -337,8 +337,12 @@ to configure a new one (OpenRouter, a paid API, anything with
 the form comes pre-filled with the z.ai defaults so all you paste is the key,
 which is saved to the `ZAI_API_KEY` environment variable. **Detect local**
 auto-adds a running **Ollama** or **LM Studio** with its installed models.
-The choice is **per chat** — pick a local Llama for one project while
-another stays on the free default — and it's remembered with the chat.
+There's also a **model selector in the title bar** — a slick dropdown that
+lists every configured model as its own equal entry (the free z.ai model, an
+OpenRouter model, each local Ollama/LM Studio model — no grouping), so
+switching the current chat's model is one click. The choice is **per chat** —
+pick a local Llama for one project while another stays on the free default —
+and it's remembered with the chat.
 Vision keeps routing through the built-in provider, so screenshots keep
 working even when the chat's model can't see images.
 
