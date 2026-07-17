@@ -546,6 +546,32 @@ class Api:
         if isinstance(url, str) and url.startswith(("http://", "https://")):
             webbrowser.open(url)
 
+    def open_path(self, path: str):
+        """Open a file/folder the agent mentioned, in whatever the OS has
+        associated with it (editor for code, explorer for folders). Only ever
+        called from a user's explicit click on a path in the chat."""
+        if not isinstance(path, str) or not path.strip():
+            return {"error": "empty"}
+        p = Path(path.strip()).expanduser()
+        if not p.is_absolute():
+            p = Path.cwd() / p
+        try:
+            p = p.resolve()
+        except OSError:
+            return {"error": "bad path"}
+        if not p.exists():
+            return {"error": "not found"}
+        try:
+            if sys.platform == "win32":
+                os.startfile(str(p))  # noqa: S606 -- user-initiated open
+            elif sys.platform == "darwin":
+                subprocess.Popen(["open", str(p)])
+            else:
+                subprocess.Popen(["xdg-open", str(p)])
+        except OSError as e:
+            return {"error": str(e)}
+        return {"ok": True}
+
     # -- settings ---------------------------------------------------------- #
 
     def _settings(self):
@@ -681,6 +707,7 @@ class Api:
         self.session_title = title
         self.auto_backup = auto_backup
         self._backup_repo = BackupRepo(sid, Path.cwd()) if cwd_ok else None
+        agent.backup_repo = self._backup_repo  # powers the review_changes tool
         # Append-only conversation log; rebuild so the system prompt gains
         # the note telling the model these files exist and how to grep them.
         agent.transcript = Transcript(sid, cwd=str(Path.cwd()))

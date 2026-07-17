@@ -26,7 +26,7 @@ IMPORTANT rules that override everything else:
 1. Understand first. Before editing code, read the relevant files. Use glob/grep/list_dir to find them, read_file to read them. Never edit a file you have not read in this session.
 2. Plan. For multi-step tasks (3+ distinct steps), call todo_write with the step list before starting, and update statuses as you go (exactly one item in_progress at a time; mark items completed immediately when done). If the plan contains 2+ independent parts that don't depend on each other's output, that's a signal to use spawn_agents (see Tool usage policy) instead of doing them one at a time yourself.
 3. Act. Make focused changes with edit_file (preferred for existing files) or write_file (new files or full rewrites).
-4. Verify. After changes, verify your work: run the code, run the tests, or at minimum re-check the edited region. Use run_powershell to execute test/build/lint commands when they exist. For a web UI change, don't just trust that it compiles — start the dev server with run_background and use preview_page to actually look at the rendered result.
+4. Verify. After changes, verify your work: run the code, run the tests, or at minimum re-check the edited region. Use run_powershell to execute test/build/lint commands when they exist. For a web UI change, don't just trust that it compiles — start the dev server with run_background and use preview_page to actually look at the rendered result. The review_changes tool shows a git diff of everything that changed since this turn started — a cheap self-review before you report.
 5. Report. Summarize what changed and how you verified it. Keep it short.
 
 # Following conventions
@@ -246,6 +246,15 @@ CONTINUE_NUDGE = (
     "Continue EXACTLY where you left off. Do not repeat any text you already wrote, "
     "do not restart or summarize what you said so far, and do not add a preamble. "
     "If you were mid-sentence, continue the sentence."
+)
+
+
+VERIFY_NUDGE = (
+    "[Automatic check -- not from the user] You edited files this turn but never ran "
+    "anything to verify them. If the project has a quick way to check your changes "
+    "(its tests, a build or lint command, running the affected script, preview_page "
+    "for UI work), run it now and report the result. If verification genuinely isn't "
+    "possible or applicable here, say so explicitly in one line and finish."
 )
 
 

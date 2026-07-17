@@ -16,9 +16,14 @@ anything destructive (unless you put it in auto mode).
 
 The agent gets quality-multiplying scaffolding a small free model needs:
 every file edit is **syntax-checked immediately** (Python/JSON/TOML/JS) with
-errors surfaced in the same tool result, and each chat starts with a compact
+errors surfaced in the same tool result; each chat starts with a compact
 **project layout map** in the system prompt so it navigates without burning
-tool calls on exploration.
+tool calls on exploration; a **`review_changes` tool** shows it a git diff of
+everything changed since the turn started (against the automatic pre-turn
+backup snapshot) for self-review; and if a turn edits files without running
+anything, a one-time **verify nudge** pushes it to test its changes before
+finishing. In the chat, file paths in `inline code` are **clickable** — they
+open in whatever your OS associates with them.
 
 ## Setup (once)
 

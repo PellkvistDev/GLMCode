@@ -18,12 +18,20 @@ from .config import Config
 from .events import AgentEvents
 from .permissions import PermissionEngine
 from .prompts import (COMPACT_PROMPT, CONTINUE_NUDGE, STEER_NUDGE_TEMPLATE,
-                      STEP_LIMIT_NUDGE, SUBAGENT_PREAMBLE, VIEW_IMAGE_PROMPT,
-                      VISION_ANALYSIS_PROMPT, WRAP_UP_NUDGE, build_system_prompt)
+                      STEP_LIMIT_NUDGE, SUBAGENT_PREAMBLE, VERIFY_NUDGE,
+                      VIEW_IMAGE_PROMPT, VISION_ANALYSIS_PROMPT, WRAP_UP_NUDGE,
+                      build_system_prompt)
 from .tools import (COMPACT_CONTEXT_TOOL, GENERATE_IMAGE_TOOL, PREVIEW_PAGE_TOOL,
-                    REMEMBER_TOOL, SHOW_HTTP_CAT_TOOL, SHOW_IMAGE_TOOL, SPEAK_TOOL,
-                    SUBAGENT_TOOL, TOOL_SCHEMAS, VIEW_IMAGE_TOOL, ToolError,
-                    execute_tool, get_todos)
+                    REMEMBER_TOOL, REVIEW_CHANGES_TOOL, SHOW_HTTP_CAT_TOOL,
+                    SHOW_IMAGE_TOOL, SPEAK_TOOL, SUBAGENT_TOOL, TOOL_SCHEMAS,
+                    VIEW_IMAGE_TOOL, ToolError, execute_tool, get_todos)
+
+# Tools whose output tells the model whether its changes actually work --
+# used by the verify-nudge (see _run_turn): a turn that edits files but never
+# runs any of these gets one automatic push to verify before finishing.
+VERIFICATION_TOOLS = {"run_powershell", "run_background", "run_tests",
+                      "run_test_file", "preview_page"}
+EDIT_TOOLS = {"write_file", "edit_file"}
 
 MAX_SUBAGENTS = 6
 # Safety cap on auto-continue-on-truncation rounds (see _call_model_until_done).
@@ -163,6 +171,14 @@ class Agent:
         # and for sub-agents (their reports land in the parent's transcript
         # via the spawn_agents tool result).
         self.transcript = None
+        # Optional shadow-git BackupRepo (see backup.py), set by the GUI --
+        # backs the review_changes tool ("what changed since this turn
+        # started?"). Shared with sub-agents, who work in the same tree.
+        self.backup_repo = None
+        # Verify-nudge bookkeeping, reset each turn (see _run_turn).
+        self._turn_wrote_files = False
+        self._turn_verified = False
+        self._verify_nudged = False
         self.rebuild_system_prompt()
 
     # ------------------------------------------------------------------ #
@@ -450,6 +466,15 @@ class Agent:
         self.events.show_audio(str(saved), caption=text)
         return self._asset_marker("audio", saved, text, "Generated and played for the user.")
 
+    def _review_changes_tool(self) -> str:
+        """Diff of the work-tree against the automatic pre-turn snapshot."""
+        if self.backup_repo is None:
+            raise ToolError(
+                "change tracking isn't available here (auto-backup is off for "
+                "this chat, or this is the terminal version) -- use git_diff "
+                "or read the files directly instead")
+        return self.backup_repo.turn_diff()
+
     # ------------------------------------------------------------------ #
     # Main loop
 
@@ -564,6 +589,9 @@ class Agent:
         self.messages.append(user_message)
         if self.transcript:
             self.transcript.user(_msg_text(user_message))
+        self._turn_wrote_files = False
+        self._turn_verified = False
+        self._verify_nudged = False
 
         model = self.cfg.model
         if self._payload_has_images():
@@ -596,6 +624,17 @@ class Agent:
             self._log_assistant_msg(msg)
 
             if not result.tool_calls:
+                # One automatic push before accepting a final answer: a turn
+                # that edited files but never ran ANYTHING has skipped the
+                # "Verify" step entirely -- ask once, then accept whatever
+                # the model decides (it may legitimately decline).
+                if (self._turn_wrote_files and not self._turn_verified
+                        and not self._verify_nudged):
+                    self._verify_nudged = True
+                    self.events.info("files were edited but nothing was run -- "
+                                     "asking the agent to verify its changes")
+                    self.messages.append({"role": "user", "content": VERIFY_NUDGE})
+                    continue
                 return  # final answer already streamed
 
             try:
@@ -738,6 +777,12 @@ class Agent:
                 self._tool_reply(tc, msg, error=True, name=name, args=args)
                 continue
 
+            # Verify-nudge bookkeeping: attempting a verification tool counts
+            # even if it fails (a failing test run still tells the model the
+            # truth about its changes); an edit only counts once it succeeds.
+            if name in VERIFICATION_TOOLS:
+                self._turn_verified = True
+
             try:
                 if name == SUBAGENT_TOOL:
                     if not self.allow_subagents:
@@ -765,8 +810,12 @@ class Agent:
                     # not just in future sessions (which pick it up naturally
                     # since it's read from disk on every fresh Agent init).
                     self.rebuild_system_prompt()
+                elif name == REVIEW_CHANGES_TOOL:
+                    output = self._review_changes_tool()
                 else:
                     output = execute_tool(name, args)
+                if name in EDIT_TOOLS:
+                    self._turn_wrote_files = True
                 self._tool_reply(tc, output, name=name, args=args)
             except ToolError as e:
                 self._tool_reply(tc, f"ERROR: {e}", error=True, name=name, args=args)
@@ -876,6 +925,9 @@ class Agent:
         client = ZaiClient(self.client.api_key, self.client.base_url, rate_limiter=limiter)
         sink = _CaptureEvents(forward=self._emit_subagent_stream, aid=aid)
         sub = Agent(self.cfg, client, events=sink, allow_subagents=False)
+        # Same work-tree, same pre-turn baseline -- so review_changes works
+        # inside sub-agents too.
+        sub.backup_repo = self.backup_repo
         with self._active_subagents_lock:
             self._active_subagents[aid] = sub
         try:

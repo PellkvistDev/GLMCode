@@ -109,6 +109,22 @@ function highlight(code, lang) {
   return out + hlPlain(code.slice(last), kwset);
 }
 
+// Something that plausibly names a file on disk: optional drive/segments and
+// a real extension, optionally with a trailing :line(:col). Deliberately NOT
+// matching bare words -- false positives make every identifier look a link.
+const PATHISH_RE = /^(?:[A-Za-z]:[\\/])?[\w.~-]+(?:[\\/][\w.~-]+)*\.[A-Za-z0-9]{1,8}(?::\d+(?::\d+)?)?$/;
+
+document.addEventListener("click", async (e) => {
+  const el = e.target.closest("code.maybe-path");
+  if (!el) return;
+  const path = el.textContent.replace(/:\d+(?::\d+)?$/, ""); // strip :line(:col)
+  try {
+    const res = await api().open_path(path);
+    if (res && res.error && res.error !== "not found") toast(res.error, "error", 5000);
+    if (res && res.error === "not found") toast(`Not found: ${path}`, "warn", 3500);
+  } catch (err) { /* bridge unavailable; ignore */ }
+});
+
 /* Minimal markdown renderer (safe: escapes first, then adds structure). */
 function md(src) {
   const codeBlocks = [];
@@ -119,8 +135,12 @@ function md(src) {
     return `\u0000${codeBlocks.length - 1}\u0000`;
   });
   src = esc(src);
-  // inline code
-  src = src.replace(/`([^`\n]+)`/g, (_, c) => `<code>${c}</code>`);
+  // inline code; file-looking spans become click-to-open (see the document
+  // click handler -- the backend only acts if the path actually exists)
+  src = src.replace(/`([^`\n]+)`/g, (_, c) =>
+    PATHISH_RE.test(c)
+      ? `<code class="maybe-path" title="Click to open">${c}</code>`
+      : `<code>${c}</code>`);
   // links (escaped text: [t](url))
   src = src.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g,
     (_, t, u) => `<a data-href="${u}">${t}</a>`);
@@ -370,6 +390,8 @@ function renderHistory(items, todos) {
       w.appendChild(el);
     } else if (it.kind === "compacted") {
       ensureWrap().appendChild(buildCompactedEl(it.summary || ""));
+    } else if (it.kind === "steered") {
+      ensureWrap().appendChild(buildSteeredEl(it.text || ""));
     } else if (it.kind === "tool_image") {
       ensureWrap().appendChild(buildImageCard(it.src || "", it.caption || "", it.path || ""));
     } else if (it.kind === "tool_audio") {

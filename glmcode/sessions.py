@@ -11,7 +11,15 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import CONFIG_DIR
-from .prompts import CONTINUE_NUDGE
+from .prompts import (CONTINUE_NUDGE, STEER_NUDGE_TEMPLATE, STEP_LIMIT_NUDGE,
+                      VERIFY_NUDGE, WRAP_UP_NUDGE)
+
+# Internal plumbing messages the agent injects mid-turn; they were never
+# typed by the user, so history replay must not render them as user bubbles.
+_INTERNAL_NUDGES = {CONTINUE_NUDGE, STEP_LIMIT_NUDGE, VERIFY_NUDGE, WRAP_UP_NUDGE}
+# STEER_NUDGE_TEMPLATE-wrapped messages ARE from the user -- shown as the
+# same "You steered" note the live view used, not as a framed wall of text.
+_STEER_PREFIX = STEER_NUDGE_TEMPLATE.split("{text}")[0]
 
 _ASSET_MARKER_RE = re.compile(r"^\[(image|audio): (.*?)\](?:\s*\[caption: (.*?)\])?\s*")
 
@@ -162,9 +170,13 @@ def to_display(messages: list) -> list[dict]:
             if text.startswith("[Context was compacted"):
                 items.append({"kind": "compacted", "summary": _compacted_summary(text)})
                 continue
-            if text == CONTINUE_NUDGE:
-                # Internal nudge from the auto-continue-on-truncation logic
-                # (agent.py); not a real user message, so don't render it.
+            if text in _INTERNAL_NUDGES:
+                # Internal agent plumbing (auto-continue, step-limit/wrap-up
+                # and verify nudges); not real user messages, don't render.
+                continue
+            if text.startswith(_STEER_PREFIX):
+                items.append({"kind": "steered",
+                              "text": text[len(_STEER_PREFIX):].strip()})
                 continue
             marker = "\n\n[Image analysis:"
             if marker in text:

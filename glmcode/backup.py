@@ -46,9 +46,12 @@ class BackupRepo:
         self.git_dir = BACKUPS_DIR / session_id
 
     def _run(self, *args: str, check: bool = True) -> subprocess.CompletedProcess:
+        # errors="replace", not strict text=True: diff output can contain
+        # non-UTF-8 bytes (latin-1 sources, binary blobs) and a decode crash
+        # here would break snapshot/diff/revert on perfectly normal projects.
         return subprocess.run(
             ["git", f"--git-dir={self.git_dir}", f"--work-tree={self.project_dir}", *args],
-            capture_output=True, text=True, check=check,
+            capture_output=True, encoding="utf-8", errors="replace", check=check,
         )
 
     def _initialized(self) -> bool:
@@ -93,6 +96,30 @@ class BackupRepo:
                 continue
             h, ts, msg = parts
             out.append(Snapshot(commit=h, message=msg, timestamp=ts))
+        return out
+
+    def turn_diff(self, max_chars: int = 8000) -> str:
+        """Everything that changed in the work-tree since the last snapshot
+        (i.e. since the current turn started) as a git diff -- lets the agent
+        self-review its own changes before reporting. Read-only apart from
+        intent-to-add records in the shadow index (needed so NEW files show
+        up in the diff; the next snapshot's `add -A` supersedes them)."""
+        if not available():
+            return "(git is not installed, so no change tracking is available)"
+        if not self._initialized():
+            return ("(no pre-turn snapshot exists yet in this chat -- nothing "
+                    "to diff against)")
+        try:
+            self._run("add", "-A", "-N", check=False)
+            stat = self._run("diff", "HEAD", "--stat", check=False).stdout
+            patch = self._run("diff", "HEAD", check=False).stdout
+        except Exception as e:
+            return f"(could not compute the diff right now: {e})"
+        if not patch.strip():
+            return "No changes since the pre-turn snapshot."
+        out = f"Changes since this turn's pre-turn snapshot:\n\n{stat}\n{patch}"
+        if len(out) > max_chars:
+            out = out[:max_chars] + f"\n... [diff truncated at {max_chars} chars]"
         return out
 
     def revert_to(self, commit: str) -> None:

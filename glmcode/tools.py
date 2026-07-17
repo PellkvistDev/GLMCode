@@ -1720,6 +1720,16 @@ TOOL_SCHEMAS = [
         ["text"],
     ),
     _schema(
+        "review_changes",
+        "Show everything that changed in the project since this turn started -- your "
+        "own edits plus any side effects of commands you ran -- as a git diff against "
+        "the automatic pre-turn snapshot. Use it to self-review before reporting a "
+        "task done, or whenever you're unsure what state the files are actually in. "
+        "Read-only; no arguments.",
+        {},
+        [],
+    ),
+    _schema(
         "remember",
         "Save a short, durable fact or instruction about the USER that should apply to "
         "EVERY future chat, in every project -- not just this one. Use it when the user "
@@ -1749,6 +1759,7 @@ SHOW_IMAGE_TOOL = "show_image"
 COMPACT_CONTEXT_TOOL = "compact_context"
 SPEAK_TOOL = "speak"
 REMEMBER_TOOL = "remember"
+REVIEW_CHANGES_TOOL = "review_changes"
 SHOW_HTTP_CAT_TOOL = "show_http_cat"
 PREVIEW_PAGE_TOOL = "preview_page"
 
@@ -1798,7 +1809,8 @@ TOOL_FUNCTIONS = {
 # prompt would just be friction, not a meaningful safety check.
 READONLY_TOOLS = {"read_file", "list_dir", "glob", "grep", "find_references",
                  "todo_write", "remember", "show_image", "compact_context",
-                 "read_output", "stop_process", "list_processes"}
+                 "read_output", "stop_process", "list_processes",
+                 "review_changes"}
 # Tools that modify files (auto-approved in autoedit mode).
 FILE_WRITE_TOOLS = {"write_file", "edit_file", "git_commit"}
 # Network read tools (prompt in ask mode, auto-approved in autoedit/yolo).
