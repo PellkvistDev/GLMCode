@@ -187,6 +187,13 @@ class Agent:
         # vision keeps working through the built-in provider).
         self.model_override: str | None = None
         self.vision_client: ZaiClient | None = None
+        # Vision "direct" mode: images the model asks to view (via view_image)
+        # are embedded into the conversation instead of being described by the
+        # GLM vision model, so a multimodal chat model sees them itself. Queued
+        # here as (name, data_uri) and injected after the tool batch, mirroring
+        # steering. Empty in "describe" mode (the default).
+        self._pending_images: list[tuple[str, str]] = []
+        self._routed_model_note: str | None = None  # de-dupe the routing notice
         # Verify-nudge bookkeeping, reset each turn (see _run_turn).
         self._turn_wrote_files = False
         self._turn_verified = False
@@ -288,13 +295,9 @@ class Agent:
         from .api import encode_image_data_uri
         return encode_image_data_uri(p)
 
-    def attach_files(self, text: str, paths: list[Path]) -> dict:
-        """Build the user message for a turn with attached files (any type,
-        not just images). Unlike attach_images, nothing is read, encoded, or
-        sent to any model here -- each file is copied into an uploads/
-        folder in the project and the model gets a path reference, the same
-        way it would find any other file already in the project. It decides
-        for itself whether to read_file/view_image the attachment."""
+    def _copy_to_uploads(self, paths: list[Path]) -> list[str]:
+        """Copy each file into the project's uploads/ folder; return a
+        'name (see path)' reference for each (or a FAILED note)."""
         refs = []
         for p in paths:
             dest = self.workdir / "uploads" / f"{p.stem}-{uuid.uuid4().hex[:6]}{p.suffix}"
@@ -304,11 +307,53 @@ class Agent:
                 refs.append(f"{p.name} (see {self._display_path(dest)})")
             except OSError as e:
                 refs.append(f"{p.name} (FAILED to attach: {e})")
+        return refs
 
+    def attach_files(self, text: str, paths: list[Path]) -> dict:
+        """Build the user message for a turn with attached files (any type,
+        not just images). Unlike attach_images, nothing is read, encoded, or
+        sent to any model here -- each file is copied into an uploads/
+        folder in the project and the model gets a path reference, the same
+        way it would find any other file already in the project. It decides
+        for itself whether to read_file/view_image the attachment."""
+        refs = self._copy_to_uploads(paths)
         note = ("The user attached a file: " if len(refs) == 1 else
                 "The user attached files: ") + ", ".join(refs)
         combined = f"{text}\n\n[{note}]" if text else f"[{note}]"
         return {"role": "user", "content": combined}
+
+    def attach_uploads(self, text: str, paths: list[Path]) -> dict:
+        """The desktop app's attachment handler, honoring vision_route:
+
+        - "describe" (default): every file -> uploads/ + a path reference (the
+          model reads/view_images them; images route through GLM vision). This
+          is the long-standing behavior.
+        - "direct": image files are embedded inline so a multimodal chat model
+          sees them itself; non-image files still go to uploads/ + a reference.
+        """
+        if self.cfg.vision_route != "direct":
+            return self.attach_files(text, paths)
+        from .api import IMAGE_EXTENSIONS
+        images = [p for p in paths if p.suffix.lower() in IMAGE_EXTENSIONS]
+        others = [p for p in paths if p.suffix.lower() not in IMAGE_EXTENSIONS]
+        parts: list = []
+        embedded = []
+        for p in images:
+            try:
+                parts.append({"type": "image_url", "image_url": {"url": self._encode(p)}})
+                embedded.append(p)
+            except ValueError:
+                others.append(p)  # too big to embed -> fall back to a file ref
+        if not parts:
+            return self.attach_files(text, paths)  # nothing embeddable
+        note = text or ""
+        if others:
+            refs = self._copy_to_uploads(others)
+            note = (note + "\n\n" if note else "") + \
+                "[The user also attached: " + ", ".join(refs) + "]"
+        names = ", ".join(p.name for p in embedded)
+        parts.append({"type": "text", "text": note or f"(the user attached: {names})"})
+        return {"role": "user", "content": parts}
 
     def _payload_has_images(self) -> bool:
         for m in self.messages:
@@ -319,10 +364,53 @@ class Agent:
                 return True
         return False
 
-    @staticmethod
-    def _resolve_existing_image(path: str, tool_name: str) -> Path:
+    def _model_for_turn(self) -> str:
+        """Which model runs this step. Normally the chat's model, but images
+        in the context force a routing decision:
+
+        - "direct" mode with a custom (BYOM) model: keep the chat model -- the
+          user set direct because their model is multimodal and should see the
+          image itself.
+        - otherwise (describe mode, or the built-in free model which can't see
+          images on its coding model): route to the GLM vision model.
+        """
+        base = self.model_override or self.cfg.model
+        if self._payload_has_images():
+            if self.model_override and self.cfg.vision_route == "direct":
+                target = base
+            else:
+                target = self.cfg.vision_model
+        else:
+            target = base
+        if self._payload_has_images() and target != self._routed_model_note:
+            self.events.info(f"images in context -> using {target}")
+            self._routed_model_note = target
+        return target
+
+    def _inject_pending_images(self) -> None:
+        """Flush images the model asked to view in direct mode into the
+        conversation as a user message, so the next step's (multimodal) model
+        sees them directly. Runs after the tool batch, like steering, so tool
+        replies stay contiguous with their assistant message."""
+        if not self._pending_images:
+            return
+        pending = self._pending_images
+        self._pending_images = []
+        content: list = [{"type": "image_url", "image_url": {"url": uri}}
+                         for _, uri in pending]
+        names = ", ".join(name for name, _ in pending)
+        verb = "is" if len(pending) == 1 else "are"
+        content.append({"type": "text",
+                        "text": f"(Here {verb} the image{'' if len(pending) == 1 else 's'} "
+                                f"you asked to view: {names})"})
+        self.messages.append({"role": "user", "content": content})
+
+    def _resolve_existing_image(self, path: str, tool_name: str) -> Path:
         """Resolve+validate a path argument that must point at an existing,
-        supported image file. Shared by view_image and show_image."""
+        supported image file. Shared by view_image and show_image. (Instance
+        method: it resolves relative paths against this chat's workdir -- a
+        stray @staticmethod here raised NameError on `self` for every relative
+        path the model passed.)"""
         from .api import IMAGE_EXTENSIONS
         raw = str(path or "").strip()
         if not raw:
@@ -339,9 +427,10 @@ class Agent:
             )
         return p
 
-    @staticmethod
-    def _display_path(p: Path) -> str:
-        """cwd-relative path for a nicer/portable tool-result marker, when possible."""
+    def _display_path(self, p: Path) -> str:
+        """workdir-relative path for a nicer/portable tool-result marker, when
+        possible. (Instance method: it needs this chat's workdir, and a stray
+        @staticmethod here used to raise NameError on `self` for every upload.)"""
         try:
             return str(p.relative_to(self.workdir))
         except ValueError:
@@ -351,6 +440,18 @@ class Agent:
         """The agent's own tool for looking at an image file (as opposed to
         attach_images, which handles an image the user attached)."""
         p = self._resolve_existing_image(path, "view_image")
+        # Direct mode: embed the image into the conversation so a multimodal
+        # chat model sees it itself, instead of getting a GLM-vision writeup.
+        # If it's too big to embed, fall through to the describe path below.
+        if self.cfg.vision_route == "direct":
+            try:
+                uri = self._encode(p)
+            except ValueError:
+                uri = None
+            if uri is not None:
+                self._pending_images.append((p.name, uri))
+                return (f"[Attached {p.name} to the conversation -- you'll see the "
+                        f"image itself on your next step; look at it and continue.]")
         focus = (f"What the agent needs to know: {question.strip()}" if question and question.strip()
                  else "No specific focus was given; describe the image exhaustively.")
         prompt = VIEW_IMAGE_PROMPT.format(focus=focus)
@@ -362,12 +463,11 @@ class Agent:
                 raise ToolError(str(e))
         return result.strip() or "(vision model returned no description)"
 
-    @staticmethod
-    def _asset_marker(kind: str, p: Path, caption: str, note: str) -> str:
+    def _asset_marker(self, kind: str, p: Path, caption: str, note: str) -> str:
         """Tool-result text carrying a machine-parseable marker so sessions.py
         can reconstruct an inline image/audio card when a session is reopened
         later (see sessions.to_display / _extract_asset_marker)."""
-        marker = f"[{kind}: {Agent._display_path(p)}]"
+        marker = f"[{kind}: {self._display_path(p)}]"
         if caption:
             marker += f" [caption: {caption}]"
         return f"{marker} {note}"
@@ -610,12 +710,10 @@ class Agent:
         self._turn_verified = False
         self._verify_nudged = False
 
-        model = self.model_override or self.cfg.model
-        if self._payload_has_images():
-            model = self.cfg.vision_model
-            self.events.info(f"images in context -> routing to {model}")
-
         for iteration in range(self.cfg.max_turns_per_request):
+            # Recomputed each step: images can enter the context mid-turn (the
+            # model calls view_image), which changes where the turn must run.
+            model = self._model_for_turn()
             try:
                 result = self._call_model_until_done(model)
             except ApiError as e:
@@ -661,6 +759,7 @@ class Agent:
                 return
 
             self._inject_steer_messages()
+            self._inject_pending_images()
 
             if self.wrap_up_requested.is_set():
                 self.wrap_up_requested.clear()

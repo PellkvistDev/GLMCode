@@ -273,8 +273,11 @@
         <button data-v="describe" role="radio">Describe</button>
         <button data-v="direct" role="radio">Direct</button>
       </div>
-      <p class="row-sub">Describe: the vision model narrates images for the coding model (best code
-         quality). Direct: image turns run fully on the vision model.</p>
+      <p class="row-sub">Describe: the free GLM vision model narrates images for the
+         coding model — works with any chat model, best code quality. Direct: images
+         (both ones you attach and ones the agent opens with view_image) are sent
+         straight to the chat model — use this when your model is multimodal; the
+         free default falls back to GLM vision automatically.</p>
     </section>
 
     <section>

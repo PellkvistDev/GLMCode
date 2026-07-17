@@ -1357,7 +1357,7 @@ class Api:
                 file_ctx = ""
             if file_ctx:
                 text = text + file_ctx
-            msg = (agent.attach_files(text, paths) if paths
+            msg = (agent.attach_uploads(text, paths) if paths
                    else {"role": "user", "content": text})
             agent.permissions.plan_only = bool(plan and text)
             # File backup: commit the project's current state (i.e. how it
