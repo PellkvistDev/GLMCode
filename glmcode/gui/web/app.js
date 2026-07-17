@@ -326,7 +326,7 @@ function hideWelcome() {
   if (w) w.hidden = true;
 }
 
-function addUserMessage(text, images, note) {
+function addUserMessage(text, images, note, plan) {
   hideWelcome();
   $("empty-hint").hidden = true;
   const wrap = document.createElement("div");
@@ -334,6 +334,12 @@ function addUserMessage(text, images, note) {
   const b = document.createElement("div");
   b.className = "bubble-user";
   b.textContent = text;
+  if (plan) {
+    const tag = document.createElement("span");
+    tag.className = "plan-badge";
+    tag.textContent = "PLAN";
+    b.prepend(tag);
+  }
   if (images && images.length) {
     const strip = document.createElement("div");
     strip.className = "img-strip";
@@ -373,7 +379,7 @@ function renderHistory(items, todos) {
       wrap = null;
       const imgs = (it.images || []).map((src) => ({ thumb: src, name: "image" }));
       const note = it.described && imgs.length === 0 ? "Image described for the agent" : "";
-      addUserMessage(it.text || (it.described ? "(image attached)" : ""), imgs, note);
+      addUserMessage(it.text || (it.described ? "(image attached)" : ""), imgs, note, !!it.plan);
     } else if (it.kind === "assistant") {
       const w = ensureWrap();
       const b = document.createElement("div");
@@ -1280,20 +1286,23 @@ async function sendMessage() {
     return;
   }
   if (!text && attachments.length === 0) return;
+  const plan = planMode && !!text;
   const imgs = attachments.slice();
-  addUserMessage(text || (imgs.length === 1 ? "(file attached)" : "(files attached)"), imgs);
+  addUserMessage(text || (imgs.length === 1 ? "(file attached)" : "(files attached)"), imgs, "", plan);
   input.value = "";
   input.style.height = "auto";
   attachments = [];
   renderAttachments();
   setBusy(true);
   current = null;
+  $("plan-actions").hidden = true;
   try {
-    const res = await api().send(text, imgs.map((i) => i.path));
+    const res = await api().send(text, imgs.map((i) => i.path), plan);
     if (res && res.error && res.error !== "busy") toast(res.error, "error", 7000);
     if (res && res.ok) {
       updateUsage(res.prompt_tokens, res.completion_tokens, res.context);
       if (res.sessions) { sessions = res.sessions; renderSidebar(); }
+      if (plan) $("plan-actions").hidden = false; // the plan is in; offer to execute
     }
   } catch (e) {
     toast("Bridge error: " + e, "error", 7000);
@@ -1305,6 +1314,42 @@ async function sendMessage() {
 }
 $("send-btn").addEventListener("click", sendMessage);
 $("stop-btn").addEventListener("click", () => api().cancel());
+
+/* --------------------------------------------------------- plan mode -- */
+let planMode = false;
+$("plan-toggle").addEventListener("click", () => {
+  planMode = !planMode;
+  $("plan-toggle").classList.toggle("on", planMode);
+  $("plan-toggle").setAttribute("aria-pressed", String(planMode));
+  input.placeholder = planMode
+    ? "Describe the task — the agent will plan it before touching anything…"
+    : "Ask anything about your code…";
+  if (!planMode) $("plan-actions").hidden = true;
+});
+$("plan-dismiss").addEventListener("click", () => { $("plan-actions").hidden = true; });
+$("plan-execute").addEventListener("click", async () => {
+  if (busy) return;
+  $("plan-actions").hidden = true;
+  // Executing ends planning: further messages are normal turns again.
+  planMode = false;
+  $("plan-toggle").classList.remove("on");
+  $("plan-toggle").setAttribute("aria-pressed", "false");
+  input.placeholder = "Ask anything about your code…";
+  addUserMessage("Execute the approved plan.", []);
+  setBusy(true);
+  current = null;
+  try {
+    const res = await api().execute_plan();
+    if (res && res.error && res.error !== "busy") toast(res.error, "error", 7000);
+    if (res && res.ok) updateUsage(res.prompt_tokens, res.completion_tokens, res.context);
+  } catch (e) {
+    toast("Bridge error: " + e, "error", 7000);
+  } finally {
+    setBusy(false);
+    current = null;
+    $("status-chip").hidden = true;
+  }
+});
 
 $("attach-btn").addEventListener("click", async () => {
   const picked = await api().pick_files();

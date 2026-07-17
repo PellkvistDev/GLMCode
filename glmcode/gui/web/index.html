@@ -102,7 +102,16 @@
       </button>
     </div>
   </div>
+  <div id="plan-actions" class="plan-actions glass" hidden>
+    <span class="plan-actions-text">Plan ready — execute it, or keep refining it below.</span>
+    <button id="plan-execute" class="btn btn-primary">Execute plan</button>
+    <button id="plan-dismiss" class="btn btn-ghost">Dismiss</button>
+  </div>
   <div id="composer" class="glass">
+    <button id="plan-toggle" class="icon-btn" aria-label="Plan first" aria-pressed="false"
+            title="Plan first: explore read-only and propose a plan before touching anything">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+    </button>
     <button id="attach-btn" class="icon-btn" aria-label="Attach files" title="Attach files">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
     </button>

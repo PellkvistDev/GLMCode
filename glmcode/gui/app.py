@@ -29,7 +29,7 @@ from .. import backup as backup_module
 from ..config import (BUILTIN_PROVIDER_NAME, CONFIG_DIR, PERMISSION_MODES, Config,
                       all_providers, find_provider, load_config, save_config)
 from ..events import AgentEvents
-from ..prompts import TITLE_PROMPT
+from ..prompts import EXECUTE_PLAN_MESSAGE, PLAN_MODE_PREAMBLE, TITLE_PROMPT
 from ..sessions import SessionStore, new_id, to_display
 from ..transcript import Transcript, search_sessions
 from ..tools import configure_search, get_todos, restore_todos
@@ -996,20 +996,26 @@ class Api:
 
     # -- chat ---------------------------------------------------------- #
 
-    def send(self, text: str, file_paths: list | None = None):
+    def send(self, text: str, file_paths: list | None = None, plan: bool = False):
         if not self._agent or not self.session_id:
             return {"error": "no active chat — start a New Chat first"}
         if not self._turn_lock.acquire(blocking=False):
             return {"error": "busy"}
         try:
             text = (text or "").strip()
+            raw_text = text  # pre-wrap, for title generation
             paths = [Path(p) for p in (file_paths or []) if Path(p).is_file()]
             if not text and not paths:
                 return {"error": "empty"}
+            if plan and text:
+                # Read-only planning turn: the preamble sets expectations and
+                # permissions.plan_only (below) makes them non-negotiable.
+                text = PLAN_MODE_PREAMBLE.format(text=text)
             if paths:
                 msg = self._agent.attach_files(text, paths)
             else:
                 msg = {"role": "user", "content": text}
+            self._agent.permissions.plan_only = bool(plan and text)
             # File backup: commit the project's current state (i.e. how it
             # looked right before this message's own edits) so "revert to
             # here" later can put it back. Best-effort -- a backup failure
@@ -1030,8 +1036,8 @@ class Api:
             self._events.start_turn(self._cfg.read_aloud)
             self._agent.run_turn(msg)
             # First turn of a fresh chat: let the model name it for the sidebar.
-            if not self.session_title and text:
-                t = self._generate_title(text)
+            if not self.session_title and raw_text:
+                t = self._generate_title(raw_text)
                 if t:
                     self.session_title = t
                     if self._agent.transcript:
@@ -1048,8 +1054,15 @@ class Api:
             self._events.error(f"{type(e).__name__}: {e}")
             return {"error": str(e)}
         finally:
+            if self._agent:
+                self._agent.permissions.plan_only = False  # never outlive the turn
             self._save_current()
             self._turn_lock.release()
+
+    def execute_plan(self):
+        """The 'Execute plan' button: a normal (non-plan) turn with a canned
+        instruction to carry out the plan the user just approved."""
+        return self.send(EXECUTE_PLAN_MESSAGE)
 
     def cancel(self):
         if self._agent:

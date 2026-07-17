@@ -34,11 +34,19 @@ class PermissionEngine:
     allowed_tools: set = field(default_factory=set)
     allowed_prefixes: set = field(default_factory=set)
     command_aliases: dict = field(default_factory=dict)  # composite command prefixes -> base prefix
+    # Plan mode: the current turn is exploration-only. Enforced here rather
+    # than by prompt-asking-nicely -- a hard deny with corrective feedback,
+    # regardless of ask/autoedit/yolo mode or session allowlists.
+    plan_only: bool = False
 
     def check(self, name: str, args: dict, asker) -> Decision:
         """asker(prompt_lines, preview) -> 'y' | 'a' | 'n' | ('n', feedback)"""
         if name in READONLY_TOOLS:
             return Decision(True)
+        if self.plan_only:
+            return Decision(False, (
+                "Plan mode is active: only read-only exploration tools are "
+                "allowed this turn. Finish exploring and write the plan."))
         if self.mode == "yolo":
             return Decision(True)
         if name in self.allowed_tools:

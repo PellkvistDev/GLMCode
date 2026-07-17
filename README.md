@@ -167,6 +167,17 @@ right because the code compiled. The **first** use installs Playwright and
 downloads Chromium (~150-300MB, one-time); every call after that runs fully
 offline aside from loading the page itself.
 
+### Plan mode
+
+The checklist icon in the composer toggles **plan first**: your next message
+becomes a read-only planning turn — the agent may explore the project all it
+wants, but editing, writing and command tools are **hard-disabled by the
+permission engine** (not just asked nicely), so nothing can change while you
+haven't agreed to anything. It replies with a numbered plan; a bar appears
+offering **Execute plan** (which seeds the task checklist and works through
+the steps) or keep refining it by just replying. Plan messages carry a PLAN
+badge in the chat, including after reload.
+
 ### Sub-agents
 
 For work that splits into independent parts (research across several areas,

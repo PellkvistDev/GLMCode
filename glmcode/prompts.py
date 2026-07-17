@@ -249,6 +249,29 @@ CONTINUE_NUDGE = (
 )
 
 
+PLAN_MODE_PREAMBLE = (
+    "[PLAN MODE] The user wants a plan BEFORE any changes are made. Explore the "
+    "project with read-only tools (read_file/grep/glob/list_dir) as much as you "
+    "need, then reply with:\n"
+    "1. A one-line restatement of the goal.\n"
+    "2. A numbered, step-by-step plan -- concrete enough to execute, with the "
+    "file paths each step touches.\n"
+    "3. Any open questions or risks the user should decide on.\n"
+    "Do NOT make any changes: editing, command and write tools are disabled for "
+    "this turn (attempts will be denied). The user will review the plan and "
+    "either refine it with you or tell you to execute it.\n\n"
+    "The user's request:\n\n{text}"
+)
+
+
+EXECUTE_PLAN_MESSAGE = (
+    "Execute the approved plan now. Start by calling todo_write with the plan's "
+    "steps, then work through them in order, verifying as you go. If reality "
+    "turns out to differ from the plan, adapt -- but flag the deviation in your "
+    "final summary."
+)
+
+
 VERIFY_NUDGE = (
     "[Automatic check -- not from the user] You edited files this turn but never ran "
     "anything to verify them. If the project has a quick way to check your changes "

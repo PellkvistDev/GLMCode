@@ -11,8 +11,9 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .config import CONFIG_DIR
-from .prompts import (CONTINUE_NUDGE, STEER_NUDGE_TEMPLATE, STEP_LIMIT_NUDGE,
-                      VERIFY_NUDGE, WRAP_UP_NUDGE)
+from .prompts import (CONTINUE_NUDGE, EXECUTE_PLAN_MESSAGE, PLAN_MODE_PREAMBLE,
+                      STEER_NUDGE_TEMPLATE, STEP_LIMIT_NUDGE, VERIFY_NUDGE,
+                      WRAP_UP_NUDGE)
 
 # Internal plumbing messages the agent injects mid-turn; they were never
 # typed by the user, so history replay must not render them as user bubbles.
@@ -20,6 +21,8 @@ _INTERNAL_NUDGES = {CONTINUE_NUDGE, STEP_LIMIT_NUDGE, VERIFY_NUDGE, WRAP_UP_NUDG
 # STEER_NUDGE_TEMPLATE-wrapped messages ARE from the user -- shown as the
 # same "You steered" note the live view used, not as a framed wall of text.
 _STEER_PREFIX = STEER_NUDGE_TEMPLATE.split("{text}")[0]
+# Same for plan-mode wrapping: replay shows the user's own words + a badge.
+_PLAN_PREFIX = PLAN_MODE_PREAMBLE.split("{text}")[0]
 
 _ASSET_MARKER_RE = re.compile(r"^\[(image|audio): (.*?)\](?:\s*\[caption: (.*?)\])?\s*")
 
@@ -182,12 +185,18 @@ def to_display(messages: list) -> list[dict]:
                 items.append({"kind": "steered",
                               "text": text[len(_STEER_PREFIX):].strip()})
                 continue
+            plan = False
+            if text.startswith(_PLAN_PREFIX):
+                text = text[len(_PLAN_PREFIX):]
+                plan = True
+            elif text == EXECUTE_PLAN_MESSAGE:
+                text = "Execute the approved plan."
             marker = "\n\n[Image analysis:"
             if marker in text:
                 text = text.split(marker, 1)[0]
                 described = True
             items.append({"kind": "user", "text": text.strip(),
-                         "images": images, "described": described})
+                         "images": images, "described": described, "plan": plan})
         elif role == "assistant":
             content = m.get("content")
             if content and content != ("Understood — I have the session summary "
