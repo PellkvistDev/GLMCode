@@ -832,7 +832,13 @@ class Agent:
                 tools=self.tool_schemas,
                 temperature=self.cfg.temperature,
                 max_tokens=self.cfg.max_tokens,
-                thinking=self.cfg.thinking,
+                # `thinking` becomes GLM's z.ai-specific {"type":"enabled"}
+                # payload field -- only send it to the built-in provider, never
+                # to a custom BYOM endpoint (Ollama/OpenRouter/etc.) which would
+                # reject or choke on it. model != model_override is True for the
+                # built-in chat model AND for the GLM vision model routed through
+                # the built-in client; False only for the custom model itself.
+                thinking=self.cfg.thinking and model != self.model_override,
                 on_content=self.events.content_delta,
                 on_reasoning=self.events.reasoning_delta,
                 on_status=self.events.info,

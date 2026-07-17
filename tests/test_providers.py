@@ -145,6 +145,32 @@ def test_client_for_routes_vision_to_vision_client(scripted_agent):
     assert agent._client_for(agent.cfg.vision_model) is agent.client
 
 
+def test_thinking_only_sent_to_builtin_not_byom(scripted_agent):
+    """GLM's z.ai-specific `thinking` param must never be sent to a custom
+    BYOM endpoint (Ollama/OpenRouter would reject or choke on it)."""
+    agent = scripted_agent()
+    agent.cfg.thinking = True
+    seen = []
+    orig = agent.client.chat
+
+    def spy(**kw):
+        seen.append((kw.get("model"), kw.get("thinking")))
+        return orig(**kw)
+
+    agent.client.chat = spy
+
+    # built-in chat (no override): thinking is sent
+    agent.model_override = None
+    agent.run_turn({"role": "user", "content": "hi"})
+    assert seen and seen[-1][1] is True
+
+    # custom model: thinking must be withheld
+    seen.clear()
+    agent.model_override = "custom/coder"
+    agent.run_turn({"role": "user", "content": "hi"})
+    assert seen and all(t is False for _, t in seen)
+
+
 def test_subagent_inherits_model_override(scripted_agent):
     from conftest import ScriptedClient
     coord = scripted_agent(allow_subagents=True)
