@@ -76,7 +76,9 @@ break until you regenerate them) — or if `requirements.txt` changed.
 ## The desktop app
 
 - **Liquid glass UI** — frameless window, translucent blurred panels, macOS-style
-  traffic lights, smooth streaming markdown, dark cinematic backdrop.
+  traffic lights, smooth streaming markdown, dark cinematic backdrop. On older or
+  low-powered machines, **Settings → Appearance → Reduce visual effects** turns off
+  the blur and animations for a flat but fully responsive UI.
 - **Parallel chats** — chats keep working when you switch away. Kick off a
   long task, jump to another project (or start a new chat) and keep talking;
   the sidebar shows a pulsing dot on chats that are working and a green dot

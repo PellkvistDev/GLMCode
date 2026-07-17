@@ -2088,6 +2088,8 @@ function syncSettingsUI() {
   $("opt-thinking").setAttribute("aria-checked", !!settings.thinking);
   $("opt-reasoning").setAttribute("aria-checked", !!settings.show_reasoning);
   $("opt-notify").setAttribute("aria-checked", !!settings.notifications);
+  $("opt-reduce-fx").setAttribute("aria-checked", !!settings.reduce_effects);
+  applyPerfMode();
   $("cwd-label").textContent = settings.cwd || "No chat selected";
   $("cwd-label").title = settings.cwd || "";
   $("tb-cwd").textContent = shortPath(settings.cwd || "");
@@ -2141,6 +2143,11 @@ function bindSwitch(id, key) {
 bindSwitch("opt-thinking", "thinking");
 bindSwitch("opt-reasoning", "show_reasoning");
 bindSwitch("opt-notify", "notifications");
+bindSwitch("opt-reduce-fx", "reduce_effects");
+
+function applyPerfMode() {
+  document.body.classList.toggle("perf-mode", !!(settings && settings.reduce_effects));
+}
 
 $("bg-change").addEventListener("click", async () => {
   const res = await api().pick_background();
@@ -2463,6 +2470,7 @@ async function boot() {
 
   const b = await api().boot();
   settings = b.settings;
+  applyPerfMode();  // before first paint of the session, so no heavy-then-flat flash
   sessions = b.sessions || [];
   if (b.contextLimit) contextLimit = b.contextLimit;
   setBackground(b.background);

@@ -167,3 +167,11 @@ def test_os_attention_respects_settings_toggle(monkeypatch):
 
 def test_notifications_default_on():
     assert config.Config().notifications is True
+
+
+def test_reduce_effects_default_off_and_exposed_in_settings():
+    assert config.Config().reduce_effects is False
+    api = gui_app.Api.__new__(gui_app.Api)
+    api._cfg = config.Config()
+    api.session_id = None
+    assert api._settings()["reduce_effects"] is False

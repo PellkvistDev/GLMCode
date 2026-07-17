@@ -18,7 +18,11 @@
   --r-lg: 22px;
   --r-md: 16px;
   --r-sm: 11px;
-  --blur: blur(28px) saturate(160%);
+  /* Kept modest on purpose: backdrop-filter is recomputed by WebView2's
+     compositor whenever content behind a glass panel changes (every scroll/
+     stream frame), and cost climbs steeply with radius. 18px still reads as
+     glass but composites far cheaper than the old 28px. */
+  --blur: blur(18px) saturate(145%);
   --font: -apple-system, BlinkMacSystemFont, "SF Pro Display", "SF Pro Text",
           "Segoe UI Variable Display", "Segoe UI", Inter, system-ui, sans-serif;
   --mono: ui-monospace, "Cascadia Code", "SF Mono", Consolas, monospace;
@@ -44,12 +48,18 @@ body {
 
 /* ------------------------------------------------ background */
 #bg {
-  position: fixed; inset: -4%;
+  position: fixed; inset: 0;
   background-size: cover; background-position: center;
   z-index: 0;
-  animation: kenburns 75s ease-in-out infinite alternate;
   transition: background-image 0.6s ease;
 }
+/* NOTE: the background is deliberately STATIC. It used to run an infinite
+   ken-burns transform, but a full-screen element animating forever behind
+   several backdrop-filter: blur() glass panels forces the compositor to
+   recompute every blur on every frame -- permanently, even at idle. That
+   alone made the whole app feel laggy. A still background lets the
+   compositor cache the blurs and only recompute them when content actually
+   moves. */
 #bg-overlay {
   position: fixed; inset: 0; z-index: 1;
   background:
@@ -57,13 +67,34 @@ body {
     linear-gradient(to top, rgba(4, 6, 14, 0.50), rgba(4, 6, 14, 0.06) 30%);
   pointer-events: none;
 }
-@keyframes kenburns {
-  from { transform: scale(1) translateY(0); }
-  to   { transform: scale(1.07) translateY(-1.2%); }
-}
 @media (prefers-reduced-motion: reduce) {
-  #bg { animation: none; }
   * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+
+/* "Reduce visual effects" (Settings): the escape hatch for weak GPUs.
+   Drops EVERY backdrop-filter (the expensive part) for solid translucent
+   panels, and kills animations. Turns the glass UI into a flat -- but fully
+   responsive -- one. */
+body.perf-mode .glass,
+body.perf-mode .glass-strong,
+body.perf-mode #titlebar,
+body.perf-mode #composer,
+body.perf-mode .sheet,
+body.perf-mode .tool,
+body.perf-mode .model-menu,
+body.perf-mode .backdrop {
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+}
+body.perf-mode .glass,
+body.perf-mode .glass-strong,
+body.perf-mode #titlebar,
+body.perf-mode #composer {
+  background: rgba(16, 21, 34, 0.92) !important;
+}
+body.perf-mode * {
+  animation-duration: 0.001ms !important;
+  animation-iteration-count: 1 !important;
 }
 
 /* ------------------------------------------------ glass primitives */

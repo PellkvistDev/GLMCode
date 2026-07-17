@@ -736,7 +736,7 @@ class Api:
             "cwd": str(Path.cwd()) if self.session_id else "",
             "background_custom": bool(c.background_path),
             "read_aloud": c.read_aloud, "tts_voice": c.tts_voice, "tts_speed": c.tts_speed,
-            "notifications": c.notifications,
+            "notifications": c.notifications, "reduce_effects": c.reduce_effects,
         }
 
     def set_setting(self, key: str, value):
@@ -748,7 +748,8 @@ class Api:
                 c.mode = value
         elif key == "vision_route" and value in ("describe", "direct"):
             c.vision_route = value
-        elif key in ("thinking", "show_reasoning", "read_aloud", "notifications"):
+        elif key in ("thinking", "show_reasoning", "read_aloud", "notifications",
+                     "reduce_effects"):
             setattr(c, key, bool(value))
         elif key in ("model", "vision_model") and isinstance(value, str) and value.strip():
             setattr(c, key, value.strip())
