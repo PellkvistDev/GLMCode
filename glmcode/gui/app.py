@@ -26,7 +26,8 @@ from ..agent import Agent
 from ..api import IMAGE_EXTENSIONS, ZaiClient
 from ..backup import BackupRepo
 from .. import backup as backup_module
-from ..config import CONFIG_DIR, PERMISSION_MODES, Config, load_config, save_config
+from ..config import (BUILTIN_PROVIDER_NAME, CONFIG_DIR, PERMISSION_MODES, Config,
+                      all_providers, find_provider, load_config, save_config)
 from ..events import AgentEvents
 from ..prompts import TITLE_PROMPT
 from ..sessions import SessionStore, new_id, to_display
@@ -448,6 +449,9 @@ class Api:
         self._turn_lock = threading.Lock()
         self.auto_backup: bool = True
         self._backup_repo: BackupRepo | None = None
+        # Per-chat model choice; "" means the built-in free default.
+        self.session_provider: str = ""
+        self.session_model: str = ""
 
         configure_search(self._cfg.search_provider, self._cfg.resolve_tavily_key())
         # Initialize command aliases for npm/yarn/pnpm/git
@@ -688,9 +692,119 @@ class Api:
         transcripts (which keep even compacted-away conversation)."""
         return {"sessions": search_sessions(self._store.list(), query)}
 
+    # -- model providers (bring your own model) ------------------------- #
+
+    def providers(self):
+        """All providers (built-in + custom) with keys masked, plus the
+        current chat's choice."""
+        out = []
+        for p in all_providers(self._cfg):
+            out.append({"name": p["name"], "base_url": p["base_url"],
+                        "models": p.get("models") or [],
+                        "builtin": bool(p.get("builtin")),
+                        "has_key": bool(p.get("api_key"))})
+        return {"providers": out,
+                "chat_provider": self.session_provider or BUILTIN_PROVIDER_NAME,
+                "chat_model": self.session_model or self._cfg.model}
+
+    def add_provider(self, name: str, base_url: str, api_key: str, models: str):
+        name = (name or "").strip()
+        base_url = (base_url or "").strip().rstrip("/")
+        model_list = [m.strip() for m in (models or "").split(",") if m.strip()]
+        if not name or not base_url or not model_list:
+            return {"error": "name, base URL and at least one model id are required"}
+        if find_provider(self._cfg, name):
+            return {"error": f'a provider named "{name}" already exists'}
+        self._cfg.providers.append({"name": name, "base_url": base_url,
+                                    "api_key": (api_key or "").strip(),
+                                    "models": model_list})
+        save_config(self._cfg)
+        return self.providers()
+
+    def delete_provider(self, name: str):
+        self._cfg.providers = [p for p in self._cfg.providers
+                               if p.get("name") != name]
+        save_config(self._cfg)
+        if self.session_provider == name and self._agent:
+            self._apply_chat_model(self._agent, "", "")  # back to the default
+            self._save_current()
+        return self.providers()
+
+    def detect_local_providers(self):
+        """Probe the well-known local OpenAI-compatible servers (Ollama,
+        LM Studio) and add any that respond as providers."""
+        import requests as _requests
+        added = []
+        probes = [
+            ("Ollama (local)", "http://localhost:11434/v1",
+             "http://localhost:11434/api/tags",
+             lambda d: [m["name"] for m in d.get("models", [])]),
+            ("LM Studio (local)", "http://localhost:1234/v1",
+             "http://localhost:1234/v1/models",
+             lambda d: [m["id"] for m in d.get("data", [])]),
+        ]
+        for name, base_url, probe_url, extract in probes:
+            try:
+                r = _requests.get(probe_url, timeout=0.8)
+                models = extract(r.json())
+            except Exception:
+                continue
+            if not models:
+                continue
+            existing = find_provider(self._cfg, name)
+            if existing and not existing.get("builtin"):
+                existing["models"] = models  # refresh the model list
+            else:
+                self._cfg.providers.append({"name": name, "base_url": base_url,
+                                            "api_key": "local", "models": models})
+            added.append(f"{name} ({len(models)} models)")
+        if added:
+            save_config(self._cfg)
+        res = self.providers()
+        res["found"] = added
+        return res
+
+    def set_chat_model(self, provider_name: str, model: str):
+        """Switch the CURRENT chat to a provider+model (per chat -- new chats
+        keep the free default)."""
+        if not self._agent or not self.session_id:
+            return {"error": "no active chat"}
+        if self._agent.busy:
+            return {"error": "can't switch models while the agent is working"}
+        if provider_name != BUILTIN_PROVIDER_NAME \
+                and not find_provider(self._cfg, provider_name):
+            return {"error": f'unknown provider "{provider_name}"'}
+        self._apply_chat_model(self._agent, provider_name, model)
+        self._save_current()
+        return self.providers()
+
+    def _apply_chat_model(self, agent: Agent, provider_name: str, model: str) -> None:
+        """Point an agent at the chat's chosen provider+model. Empty/unknown
+        provider falls back to the built-in free default."""
+        prov = find_provider(self._cfg, provider_name) if provider_name else None
+        if prov is None or prov.get("builtin"):
+            self.session_provider = ""
+            self.session_model = ""
+            agent.model_override = None
+            agent.vision_client = None
+            # Point back at the built-in client too (the agent may have been
+            # switched to a custom endpoint earlier in this chat).
+            builtin_client = self._ensure_client()
+            if builtin_client is not None:
+                agent.client = builtin_client
+            return
+        self.session_provider = prov["name"]
+        self.session_model = model or (prov.get("models") or [""])[0]
+        agent.client = ZaiClient(prov.get("api_key", ""), prov["base_url"])
+        agent.model_override = self.session_model or None
+        # Vision keeps working through the built-in provider.
+        zai_key = self._cfg.resolve_api_key()
+        agent.vision_client = ZaiClient(zai_key, self._cfg.base_url) if zai_key else None
+
     def _activate_session(self, sid: str, messages: list, cwd: str,
                           prompt_tokens: int, completion_tokens: int,
-                          todos: list, title: str = "", auto_backup: bool = True) -> dict:
+                          todos: list, title: str = "", auto_backup: bool = True,
+                          model_provider: str = "", model: str = "") -> dict:
         cwd_ok = True
         if cwd:
             try:
@@ -706,6 +820,7 @@ class Api:
         self.session_id = sid
         self.session_title = title
         self.auto_backup = auto_backup
+        self._apply_chat_model(agent, model_provider, model)
         self._backup_repo = BackupRepo(sid, Path.cwd()) if cwd_ok else None
         agent.backup_repo = self._backup_repo  # powers the review_changes tool
         # Append-only conversation log; rebuild so the system prompt gains
@@ -784,6 +899,8 @@ class Api:
             data.get("prompt_tokens", 0), data.get("completion_tokens", 0),
             data.get("todos", []), data.get("title", ""),
             auto_backup=data.get("auto_backup", True),
+            model_provider=data.get("model_provider", ""),
+            model=data.get("model", ""),
         )
         res["sessions"] = self.list_sessions()
         return res
@@ -805,7 +922,9 @@ class Api:
             u = self._agent.session_usage
             self._store.save(self.session_id, str(Path.cwd()), self._agent.messages,
                             u.prompt_tokens, u.completion_tokens, todos=get_todos(),
-                            title=self.session_title, auto_backup=self.auto_backup)
+                            title=self.session_title, auto_backup=self.auto_backup,
+                            model_provider=self.session_provider,
+                            model=self.session_model)
 
     # -- backups (per-chat shadow git repo) --------------------------------- #
 

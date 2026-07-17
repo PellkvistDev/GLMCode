@@ -77,7 +77,8 @@ class SessionStore:
     def save(self, sid: str, cwd: str, messages: list,
              prompt_tokens: int, completion_tokens: int,
              todos: list | None = None, title: str = "",
-             auto_backup: bool = True) -> None:
+             auto_backup: bool = True,
+             model_provider: str = "", model: str = "") -> None:
         body = [m for m in messages if m.get("role") != "system"]
         if not body:
             return  # never persist a session with no messages yet
@@ -99,6 +100,9 @@ class SessionStore:
             "todos": todos or [],
             "messages": body,
             "auto_backup": auto_backup,
+            # Per-chat model choice ("" = the built-in free default).
+            "model_provider": model_provider,
+            "model": model,
         }
         tmp = path.with_suffix(".tmp")
         tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")

@@ -1465,6 +1465,95 @@ $("voice-speed").addEventListener("change", async () => {
   settings = await api().set_setting("tts_speed", parseFloat($("voice-speed").value));
 });
 
+/* ---------------------------------------------- model providers (BYOM) -- */
+
+let providersCache = null;
+
+function refreshModelFoot(res) {
+  if (!res) return;
+  const builtin = res.chat_provider === (providersCache?.providers?.[0]?.name || "z.ai (free)");
+  $("model-foot").textContent = builtin
+    ? `${res.chat_model} via z.ai — always $0.00`
+    : `${res.chat_model} via ${res.chat_provider}`;
+}
+
+function fillModelSelect(selected) {
+  const p = (providersCache?.providers || []).find((x) => x.name === $("model-provider").value);
+  const models = (p && p.models) || [];
+  $("model-select").innerHTML = models.map((m) => `<option>${esc(m)}</option>`).join("");
+  if (selected && models.includes(selected)) $("model-select").value = selected;
+}
+
+function renderProviderList(providers) {
+  const list = $("provider-list");
+  list.innerHTML = "";
+  for (const p of providers) {
+    if (p.builtin) continue;
+    const row = document.createElement("div");
+    row.className = "provider-row";
+    row.innerHTML =
+      `<div class="provider-row-text"><span class="provider-name"></span>` +
+      `<span class="provider-sub"></span></div>` +
+      `<button class="icon-btn-mini" aria-label="Delete provider" title="Delete">` +
+      `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg></button>`;
+    row.querySelector(".provider-name").textContent = p.name;
+    row.querySelector(".provider-sub").textContent =
+      `${p.base_url} · ${p.models.length} model${p.models.length === 1 ? "" : "s"}`;
+    row.querySelector("button").addEventListener("click", async () => {
+      const res = await api().delete_provider(p.name);
+      populateModelPicker(res);
+    });
+    list.appendChild(row);
+  }
+  if (!list.children.length) {
+    list.innerHTML = '<div class="row-sub">No custom providers yet. Any OpenAI-compatible endpoint works.</div>';
+  }
+}
+
+async function populateModelPicker(data) {
+  const res = data || await api().providers();
+  if (!res || !res.providers) return;
+  providersCache = res;
+  $("model-provider").innerHTML = res.providers
+    .map((p) => `<option>${esc(p.name)}</option>`).join("");
+  $("model-provider").value = res.chat_provider;
+  fillModelSelect(res.chat_model);
+  renderProviderList(res.providers);
+  refreshModelFoot(res);
+}
+
+async function applyChatModel() {
+  const res = await api().set_chat_model($("model-provider").value, $("model-select").value);
+  if (res && res.error) {
+    toast(res.error, "error", 5000);
+    populateModelPicker();
+    return;
+  }
+  populateModelPicker(res);
+  toast(`This chat now uses ${res.chat_model}.`, "info", 3000);
+}
+
+$("model-provider").addEventListener("change", () => { fillModelSelect(); applyChatModel(); });
+$("model-select").addEventListener("change", applyChatModel);
+
+$("prov-add").addEventListener("click", async () => {
+  const res = await api().add_provider(
+    $("prov-name").value, $("prov-url").value, $("prov-key").value, $("prov-models").value);
+  if (res && res.error) { toast(res.error, "error", 6000); return; }
+  for (const id of ["prov-name", "prov-url", "prov-key", "prov-models"]) $(id).value = "";
+  populateModelPicker(res);
+  toast("Provider added.", "info", 3000);
+});
+
+$("prov-detect").addEventListener("click", async () => {
+  const res = await api().detect_local_providers();
+  if (res && res.error) { toast(res.error, "error", 6000); return; }
+  populateModelPicker(res);
+  toast(res.found && res.found.length
+    ? `Found: ${res.found.join(", ")}`
+    : "No local model servers found (is Ollama or LM Studio running?)", "info", 5000);
+});
+
 async function populateBackups() {
   const status = await api().backup_status();
   const toggle = $("backup-toggle");
@@ -1557,6 +1646,7 @@ $("settings-btn").addEventListener("click", async () => {
   $("settings-backdrop").hidden = false;
   populateVoiceSelect();
   populateBackups();
+  populateModelPicker();
 });
 $("settings-close").addEventListener("click", () => { $("settings-backdrop").hidden = true; });
 $("settings-backdrop").addEventListener("click", (e) => {
@@ -1795,6 +1885,7 @@ function applySession(res) {
   renderHistory(res.items, res.todos);
   if (res.cwd_missing) toast(`Project folder not found: ${res.cwd}`, "warn", 6000);
   renderSidebar();
+  populateModelPicker(); // each chat can use a different model -- refresh the footer
 }
 
 async function newChat() {

@@ -175,6 +175,12 @@ class Agent:
         # backs the review_changes tool ("what changed since this turn
         # started?"). Shared with sub-agents, who work in the same tree.
         self.backup_repo = None
+        # Bring-your-own-model: a per-chat model id overriding cfg.model, and
+        # an optional separate client for vision calls (set when the chat's
+        # provider is a custom endpoint that can't serve the vision model --
+        # vision keeps working through the built-in provider).
+        self.model_override: str | None = None
+        self.vision_client: ZaiClient | None = None
         # Verify-nudge bookkeeping, reset each turn (see _run_turn).
         self._turn_wrote_files = False
         self._turn_verified = False
@@ -256,7 +262,7 @@ class Agent:
             return {"role": "user", "content": content}
 
         with self.events.status(f"analyzing {names} with {self.cfg.vision_model}..."):
-            analysis = self.client.analyze_images(
+            analysis = self._client_for(self.cfg.vision_model).analyze_images(
                 self.cfg.vision_model,
                 VISION_ANALYSIS_PROMPT.format(user_text=text or "(no message)"),
                 image_paths,
@@ -341,7 +347,8 @@ class Agent:
         prompt = VIEW_IMAGE_PROMPT.format(focus=focus)
         with self.events.status(f"looking at {p.name} with {self.cfg.vision_model}..."):
             try:
-                result = self.client.analyze_images(self.cfg.vision_model, prompt, [p])
+                result = self._client_for(self.cfg.vision_model).analyze_images(
+                    self.cfg.vision_model, prompt, [p])
             except ValueError as e:  # e.g. encode_image_data_uri's size-limit check
                 raise ToolError(str(e))
         return result.strip() or "(vision model returned no description)"
@@ -593,7 +600,7 @@ class Agent:
         self._turn_verified = False
         self._verify_nudged = False
 
-        model = self.cfg.model
+        model = self.model_override or self.cfg.model
         if self._payload_has_images():
             model = self.cfg.vision_model
             self.events.info(f"images in context -> routing to {model}")
@@ -677,7 +684,7 @@ class Agent:
         # terminal UI's live spinner state got confused.
         self.events.stream_start()
         try:
-            result = self.client.chat(
+            result = self._client_for(model).chat(
                 model=model, messages=self.messages, tools=None,
                 temperature=self.cfg.temperature, max_tokens=self.cfg.max_tokens,
                 thinking=False, on_content=self.events.content_delta,
@@ -693,11 +700,20 @@ class Agent:
         finally:
             self.events.stream_end()
 
+    def _client_for(self, model: str) -> ZaiClient:
+        """The client to use for a given model id: vision calls go through
+        the dedicated vision client when one is set (custom providers can't
+        serve the built-in vision model); everything else uses the chat's
+        own client."""
+        if self.vision_client is not None and model == self.cfg.vision_model:
+            return self.vision_client
+        return self.client
+
     def _call_model(self, model: str):
         self._refresh_context_note()
         self.events.stream_start()
         try:
-            return self.client.chat(
+            return self._client_for(model).chat(
                 model=model,
                 messages=self.messages,
                 tools=self.tool_schemas,
@@ -928,6 +944,11 @@ class Agent:
         # Same work-tree, same pre-turn baseline -- so review_changes works
         # inside sub-agents too.
         sub.backup_repo = self.backup_repo
+        # Sub-agents inherit the chat's model (their client already points at
+        # the same provider via self.client's key/url above). vision_client is
+        # NOT shared -- it wraps a requests.Session, which isn't safe across
+        # worker threads; sub-agent vision falls back to their own client.
+        sub.model_override = self.model_override
         with self._active_subagents_lock:
             self._active_subagents[aid] = sub
         try:
@@ -973,9 +994,9 @@ class Agent:
             return "Nothing to compact yet."
         transcript = self.messages[1:]  # skip system prompt
         compact_model = (self.cfg.vision_model if self._payload_has_images()
-                         else self.cfg.model)
+                         else (self.model_override or self.cfg.model))
         with self.events.status("compacting conversation..."):
-            result = self.client.chat(
+            result = self._client_for(compact_model).chat(
                 model=compact_model,
                 messages=transcript + [{"role": "user", "content": COMPACT_PROMPT}],
                 tools=None,

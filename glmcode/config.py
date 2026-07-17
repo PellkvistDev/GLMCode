@@ -25,6 +25,28 @@ DEFAULT_VISION_MODEL = "glm-4.6v-flash"  # free vision model
 
 PERMISSION_MODES = ("ask", "autoedit", "yolo")
 
+# The always-available built-in provider (the free default). Custom providers
+# (any OpenAI-compatible endpoint: OpenRouter, Ollama, LM Studio, paid APIs)
+# are stored in Config.providers with the same shape.
+BUILTIN_PROVIDER_NAME = "z.ai (free)"
+
+
+def builtin_provider(cfg: "Config") -> dict:
+    return {"name": BUILTIN_PROVIDER_NAME, "base_url": cfg.base_url,
+            "api_key": cfg.resolve_api_key(),
+            "models": [cfg.model, cfg.vision_model], "builtin": True}
+
+
+def all_providers(cfg: "Config") -> list:
+    return [builtin_provider(cfg)] + list(cfg.providers)
+
+
+def find_provider(cfg: "Config", name: str) -> dict | None:
+    for p in all_providers(cfg):
+        if p.get("name") == name:
+            return p
+    return None
+
 
 @dataclass
 class Config:
@@ -48,6 +70,10 @@ class Config:
     read_aloud: bool = False         # desktop app: auto-speak assistant replies (Kokoro TTS)
     tts_voice: str = "af_heart"      # Kokoro voice name
     tts_speed: float = 1.0           # Kokoro speech speed, 0.5-2.0
+    # Custom model providers: [{"name", "base_url", "api_key", "models": [..]}].
+    # Any OpenAI-compatible endpoint works; chats pick a provider+model in
+    # Settings (per chat -- the free z.ai default stays the default).
+    providers: list = field(default_factory=list)
 
     extra: dict = field(default_factory=dict)
 

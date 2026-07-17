@@ -290,6 +290,17 @@ With a Tavily key set it is used automatically (`search_provider` can force
 `ddg` or `tavily`). Search results are always framed as untrusted data so the
 model doesn't follow instructions embedded in web content.
 
+## Bring your own model
+
+The free z.ai models are the default, but any **OpenAI-compatible endpoint**
+can power a chat: **Settings → Model** lets you add providers (OpenRouter, a
+paid API, anything with `/chat/completions`) or hit **Detect local** to
+auto-add a running **Ollama** or **LM Studio** with its installed models.
+The model choice is **per chat** — pick a local Llama for one project while
+another stays on the free default — and it's remembered with the chat.
+Vision keeps routing through the built-in provider, so screenshots keep
+working even when the chat's model can't see images.
+
 ## Notes on the free tier
 
 - z.ai's free Flash tier is rate-limited (~1 request/second). Make No Mistakes

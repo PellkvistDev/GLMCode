@@ -132,7 +132,7 @@
       </svg>
       Compact
     </button>
-    <span class="composer-foot-text">glm-4.7-flash &amp; glm-4.6v-flash via z.ai — always $0.00</span>
+    <span id="model-foot" class="composer-foot-text">glm-4.7-flash via z.ai — always $0.00</span>
   </div>
 </footer>
 
@@ -279,6 +279,28 @@
 
     <section>
       <h3>Model</h3>
+      <div class="row">
+        <div class="row-text"><label for="model-provider">Chat model</label>
+          <span class="row-sub">This chat only — new chats use the free default</span></div>
+        <div class="row-actions model-picker">
+          <select id="model-provider" class="voice-select"></select>
+          <select id="model-select" class="voice-select"></select>
+        </div>
+      </div>
+      <details id="providers-editor">
+        <summary>Custom providers — bring your own model…</summary>
+        <div id="provider-list" class="provider-list"></div>
+        <div class="provider-form">
+          <input id="prov-name" class="text-input" placeholder="Name (e.g. OpenRouter)">
+          <input id="prov-url" class="text-input" placeholder="Base URL (OpenAI-compatible), e.g. https://openrouter.ai/api/v1">
+          <input id="prov-key" class="text-input" type="password" placeholder="API key (leave empty for local servers)">
+          <input id="prov-models" class="text-input" placeholder="Model ids, comma-separated">
+          <div class="sheet-actions">
+            <button id="prov-detect" class="btn btn-ghost">Detect local (Ollama / LM Studio)</button>
+            <button id="prov-add" class="btn btn-primary">Add provider</button>
+          </div>
+        </div>
+      </details>
       <div class="row"><div class="row-text"><label for="opt-thinking">Extended thinking</label>
         <span class="row-sub">Model reasons before answering</span></div>
         <button id="opt-thinking" class="switch" role="switch" aria-checked="true"><span></span></button></div>
