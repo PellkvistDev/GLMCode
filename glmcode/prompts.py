@@ -148,7 +148,7 @@ def _project_map(cwd: Path, max_depth: int = 2, per_dir: int = 15,
 
 
 def _user_memory() -> str:
-    """User-level memory (~/.glmcode/memory.md), unlike _project_memory:
+    """User-level memory (~/.makenomistakes/memory.md), unlike _project_memory:
     applies to every project, every chat -- durable facts/preferences the
     agent has been asked to remember via the `remember` tool."""
     from .config import MEMORY_FILE

@@ -29,6 +29,7 @@ from .. import backup as backup_module
 from ..config import (BUILTIN_PROVIDER_NAME, CONFIG_DIR, PERMISSION_MODES, Config,
                       all_providers, find_provider, load_config, save_config)
 from ..events import AgentEvents
+from ..notify import APP_NAME, notify
 from ..prompts import EXECUTE_PLAN_MESSAGE, PLAN_MODE_PREAMBLE, TITLE_PROMPT
 from ..sessions import SessionStore, new_id, to_display
 from ..transcript import Transcript, search_sessions
@@ -74,6 +75,11 @@ class WebEvents(AgentEvents):
         self._pending: dict[str, dict] = (
             self._pending_shared if self._pending_shared is not None else {})
         self._cfg = None  # set by Api.__init__ to the shared Config instance
+        # Set by Api._make_events: called with a short body string when this
+        # chat needs the user (permission prompt). Routes to an OS-level
+        # toast when the app window isn't focused; None = no-op (tests,
+        # the sid-less global sink).
+        self.notifier = None
 
         # -- read-aloud state --------------------------------------------
         # Whether THIS turn reads assistant content aloud, snapshotted once
@@ -400,6 +406,11 @@ class WebEvents(AgentEvents):
         self._pending[rid] = entry
         self.emit("permission", id=rid, title=title, preview=preview,
                   always=always_label or "")
+        if self.notifier:
+            try:
+                self.notifier(f"Needs permission: {title}")
+            except Exception:
+                pass
         entry["event"].wait(timeout=3600)
         self._pending.pop(rid, None)
         return entry["answer"]
@@ -483,6 +494,10 @@ class Api:
         self._store = SessionStore()
         self.session_id: str | None = None
         self._client: ZaiClient | None = None
+        # Updated by JS on window focus/blur; gates OS-level toasts (they
+        # only fire while the user is away in another app -- the in-app UI
+        # already covers the focused case).
+        self._window_focused = True
 
         configure_search(self._cfg.search_provider, self._cfg.resolve_tavily_key())
         # Initialize command aliases for npm/yarn/pnpm/git
@@ -573,7 +588,21 @@ class Api:
         ev = WebEvents(sid, self._perm_registry)
         ev._cfg = self._cfg
         ev._window = self._window
+        ev.notifier = lambda body, _sid=sid: self._os_attention(_sid, body)
         return ev
+
+    def _os_attention(self, sid: str, body: str) -> None:
+        """OS-level toast for 'this chat needs you': a blocking permission
+        prompt, or a finished turn waiting on the user. Titled with the
+        chat's name so parallel chats are tellable apart."""
+        if self._window_focused:
+            return
+        cs = self._chats.get(sid)
+        notify(cs.title if cs and cs.title else APP_NAME, body)
+
+    def set_window_focus(self, focused):
+        self._window_focused = bool(focused)
+        return {"ok": True}
 
     # -- lifecycle ------------------------------------------------------- #
 
@@ -1222,6 +1251,8 @@ class Api:
                         completion_tokens=u.completion_tokens,
                         context=agent.context_estimate(),
                         title=cs.title, sessions=self.list_sessions())
+            self._os_attention(cs.sid, "Done -- waiting for you."
+                               if ok else "Stopped on an error -- waiting for you.")
 
     def execute_plan(self):
         """The 'Execute plan' button: a normal (non-plan) turn with a canned
@@ -1317,7 +1348,7 @@ def _show_error(title: str, message: str) -> None:
     except Exception:
         try:
             from pathlib import Path
-            (Path.home() / ".glmcode" / "crash.log").write_text(
+            (Path.home() / ".makenomistakes" / "crash.log").write_text(
                 f"{title}\n\n{message}", encoding="utf-8"
             )
         except OSError:
@@ -1327,7 +1358,7 @@ def _show_error(title: str, message: str) -> None:
 GUI_DIR = Path(__file__).parent          # glmcode/gui/
 ICO_PATH = GUI_DIR / "app_icon.ico"     # pre-built, ships with package
 
-STARTUP_LOG = Path.home() / ".glmcode" / "startup.log"
+STARTUP_LOG = Path.home() / ".makenomistakes" / "startup.log"
 
 
 def _startup_log(stage: str) -> None:

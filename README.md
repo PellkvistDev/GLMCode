@@ -85,8 +85,15 @@ break until you regenerate them) — or if `requirements.txt` changed.
   chats in different projects can't touch each other's files, and each keeps
   its own task checklist. If a background chat needs a permission answer, it
   waits patiently and asks the moment you switch back to it.
+- **Desktop notifications** — when the app isn't the focused window, a native
+  OS notification (Windows toast / macOS / Linux) fires the moment a chat
+  needs a permission answer or finishes and is waiting for you, titled with
+  the chat's name. No setup, no extra dependencies. All app data — chats,
+  backups, transcripts, memory, config — lives in `~/.makenomistakes/`
+  (an existing `~/.glmcode/` folder from older versions is migrated
+  automatically on first launch).
 - **Chat history, one per project** — like Claude Code / Codex, every chat is
-  tied to a project folder and saved to disk (`~/.glmcode/sessions/`). The
+  tied to a project folder and saved to disk (`~/.makenomistakes/sessions/`). The
   sidebar (toggle button next to the traffic lights) lists all your chats with
   a title, project folder and last-active time, so you can jump between
   projects without losing context:
@@ -232,7 +239,7 @@ needs network access); everything after that runs fully offline.
 ### Backups
 
 Optional, per-chat, on by default: before each message runs, your project's
-files are snapshotted to a hidden git repo (`~/.glmcode/backups/`) — separate
+files are snapshotted to a hidden git repo (`~/.makenomistakes/backups/`) — separate
 from any git repo the project already has, so it never touches your real
 history, branches, or commits. Since it's just diffing the directory's
 current state, it works no matter *how* something changed — a bad edit, a
@@ -257,7 +264,7 @@ buttons (Settings → Backups still reverts to any earlier point).
 ### Transcripts
 
 Every chat's full conversation is also appended to a plain markdown
-transcript (`~/.glmcode/transcripts/`, one file per chat) — including
+transcript (`~/.makenomistakes/transcripts/`, one file per chat) — including
 everything that compaction later summarizes away. The agent is told where
 these live, so it can grep them itself: ask about something from earlier
 that's no longer in its context — or from a *previous chat entirely* — and
@@ -291,7 +298,7 @@ or `n` (deny, optionally telling the model why).
   auto-loaded into the system prompt in future sessions (it also honors an
   existing `AGENTS.md` or `CLAUDE.md`). That's per-project; for things about
   **you** that should apply everywhere, just tell it to remember them ("remember
-  that I prefer 2-space indentation") — it's saved to `~/.glmcode/memory.md`
+  that I prefer 2-space indentation") — it's saved to `~/.makenomistakes/memory.md`
   and loaded into every chat, in every project, from then on. Say "forget
   that" / correct it and it'll edit the file directly.
 - `/compact` summarizes long conversations. The agent sees a live "context
@@ -348,12 +355,12 @@ glmcode/
                   run_powershell, todo_write, web_search, fetch_url
   permissions.py  ask/autoedit/yolo modes, session allowlists, diff previews
   prompts.py      the system prompt, vision-analysis prompt, compaction prompt
-  sessions.py     ~/.glmcode/sessions/*.json — chat history per project folder
-  backup.py       ~/.glmcode/backups/ — per-chat shadow git repo, snapshot + revert
+  sessions.py     ~/.makenomistakes/sessions/*.json — chat history per project folder
+  backup.py       ~/.makenomistakes/backups/ — per-chat shadow git repo, snapshot + revert
   events.py       frontend-agnostic event sink the agent reports through
   ui.py           rich terminal UI (streaming markdown, diffs, todo panel)
   cli.py          REPL, slash commands, image detection, first-run setup
-  config.py       ~/.glmcode/config.json
+  config.py       ~/.makenomistakes/config.json
   gui/            desktop app: pywebview shell (app.py) + HTML/CSS/JS (web/)
 tests/            pytest suite (no network, no GUI deps): agent loop, retry/
                   backoff, steering, sub-agents, backups, sessions, memory

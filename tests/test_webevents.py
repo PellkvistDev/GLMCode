@@ -118,6 +118,24 @@ def test_sidless_events_stay_untagged():
     assert "sid" not in payloads(ev)[0]
 
 
+def test_permission_prompt_pings_notifier():
+    import threading
+    ev = make_events()
+    pings = []
+    ev.notifier = pings.append
+    t = threading.Thread(
+        target=lambda: ev.ask_permission("Run PowerShell command", "rm x"),
+        daemon=True)
+    t.start()
+    for _ in range(100):
+        if ev._pending:
+            break
+        threading.Event().wait(0.01)
+    ev.resolve_permission(next(iter(ev._pending)), "y")
+    t.join(timeout=5)
+    assert pings == ["Needs permission: Run PowerShell command"]
+
+
 def test_permission_registry_shared_across_chats():
     import threading
     shared = {}

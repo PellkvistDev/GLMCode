@@ -12,7 +12,7 @@ def _show_error(title: str, message: str) -> None:
         # Last resort: write to a file the user can find
         try:
             from pathlib import Path
-            (Path.home() / ".glmcode" / "crash.log").write_text(
+            (Path.home() / ".makenomistakes" / "crash.log").write_text(
                 f"{title}\n\n{message}", encoding="utf-8"
             )
         except OSError:

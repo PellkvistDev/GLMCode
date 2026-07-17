@@ -1,5 +1,5 @@
 """Persistent chat sessions: each session stores its conversation, work folder
-and token usage in ~/.glmcode/sessions/<id>.json, like Claude Code / Codex."""
+and token usage in ~/.makenomistakes/sessions/<id>.json, like Claude Code / Codex."""
 
 from __future__ import annotations
 

@@ -8,8 +8,15 @@ python -m pip install --user -r (Join-Path $root "requirements.txt")
 if ($LASTEXITCODE -ne 0) { Write-Host "pip install failed" -ForegroundColor Red; exit 1 }
 
 # Launchers that work from any directory
-$launcherDir = Join-Path $env:USERPROFILE ".glmcode\bin"
+$launcherDir = Join-Path $env:USERPROFILE ".makenomistakes\bin"
 New-Item -ItemType Directory -Force $launcherDir | Out-Null
+
+# Upgrades from before the data-dir rename: drop stale launchers from the old
+# location so the new ones on PATH are the ones that win.
+$oldLauncherDir = Join-Path $env:USERPROFILE ".glmcode\bin"
+if (Test-Path $oldLauncherDir) {
+    Remove-Item -Recurse -Force $oldLauncherDir -ErrorAction SilentlyContinue
+}
 
 @"
 @echo off

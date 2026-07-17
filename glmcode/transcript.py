@@ -3,7 +3,7 @@
 The session store persists the model's CURRENT context -- which means
 compaction permanently shrinks what's on disk too. Transcripts fix that:
 an append-only markdown log of everything ever said in a chat, living in
-the global config dir (~/.glmcode/transcripts/, one file per chat). They
+the global config dir (~/.makenomistakes/transcripts/, one file per chat). They
 survive compaction, app restarts, and session switches -- and because
 they're plain text files, the agent itself can grep/read them to recover
 context that's no longer in its window, including from PAST chats.

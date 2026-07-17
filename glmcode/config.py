@@ -1,7 +1,7 @@
 """Configuration handling for GLM Code.
 
-Config lives at ~/.glmcode/config.json. The API key can also come from the
-ZAI_API_KEY environment variable (takes precedence over the config file).
+Config lives at ~/.makenomistakes/config.json. The API key can also come from
+the ZAI_API_KEY environment variable (takes precedence over the config file).
 """
 
 from __future__ import annotations
@@ -11,7 +11,37 @@ import os
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 
-CONFIG_DIR = Path.home() / ".glmcode"
+_LEGACY_CONFIG_DIR = Path.home() / ".glmcode"
+CONFIG_DIR = Path.home() / ".makenomistakes"
+
+
+def migrate_legacy_dir(old: Path | None = None, new: Path | None = None) -> bool:
+    """One-time move of the old ~/.glmcode data dir to ~/.makenomistakes.
+
+    Runs at import time, before any module touches CONFIG_DIR (logger.py
+    mkdirs it on import, and everything imports config first). Never
+    clobbers an existing new dir, never follows a symlinked old one, and
+    never raises -- worst case the app just starts with a fresh dir.
+    """
+    old = old if old is not None else _LEGACY_CONFIG_DIR
+    new = new if new is not None else CONFIG_DIR
+    try:
+        if new.exists() or old.is_symlink() or not old.is_dir():
+            return False
+        try:
+            old.rename(new)
+        except OSError:
+            # e.g. a file inside is locked by another process on Windows:
+            # fall back to copying (leaves the old dir behind, but the app
+            # keeps all its sessions/backups/memory).
+            import shutil
+            shutil.copytree(old, new)
+        return True
+    except Exception:
+        return False
+
+
+migrate_legacy_dir()
 CONFIG_FILE = CONFIG_DIR / "config.json"
 HISTORY_FILE = CONFIG_DIR / "history"
 # User-level memory: durable facts/preferences the agent has been asked to

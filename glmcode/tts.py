@@ -4,7 +4,7 @@ Heavy deps (kokoro_onnx, onnxruntime, soundfile) are never imported at
 module load time -- only inside functions -- so importing this module costs
 nothing until TTS is actually used. First use installs those packages via
 pip and downloads the two Kokoro model files (~300MB total, cached under
-~/.glmcode/models/kokoro/); every call after that runs fully offline.
+~/.makenomistakes/models/kokoro/); every call after that runs fully offline.
 """
 
 from __future__ import annotations

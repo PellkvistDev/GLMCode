@@ -10,6 +10,7 @@ env/
 
 # Local app state / config
 .glmcode/
+.makenomistakes/
 
 # OS / editor cruft
 .DS_Store

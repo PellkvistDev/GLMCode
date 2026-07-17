@@ -2186,6 +2186,13 @@ async function boot() {
   } else {
     showNoSession();
   }
+  // OS-level notifications (permission prompts, finished turns) only fire
+  // while the user is away in another app -- keep Python's picture of
+  // window focus current, starting from the real state right now.
+  const reportFocus = (f) => { try { api().set_window_focus(f); } catch (e) { /* ignore */ } };
+  window.addEventListener("focus", () => reportFocus(true));
+  window.addEventListener("blur", () => reportFocus(false));
+  reportFocus(document.hasFocus());
   try { api().log && api().log("boot:done"); } catch (e) { /* ignore */ }
 }
 
