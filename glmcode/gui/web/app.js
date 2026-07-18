@@ -407,6 +407,17 @@ function addUserMessage(text, images, note, plan) {
   edit.setAttribute("aria-label", "Edit and resend this message");
   edit.innerHTML = PENCIL_SVG;
   edit.addEventListener("click", () => startEditUser(wrap));
+  const copy = document.createElement("button");
+  copy.className = "user-edit user-copy";
+  copy.title = "Copy message";
+  copy.setAttribute("aria-label", "Copy this message");
+  copy.innerHTML = COPY_SVG;
+  copy.addEventListener("click", () => {
+    copyText(wrap.dataset.rawText || "")
+      .then(() => toast("Message copied.", "info", 1500))
+      .catch(() => toast("Couldn't copy to clipboard.", "error", 3000));
+  });
+  wrap.appendChild(copy);
   wrap.appendChild(edit);
   const b = document.createElement("div");
   b.className = "bubble-user";
@@ -547,6 +558,7 @@ function renderHistory(items, todos) {
       const w = ensureWrap();
       const b = document.createElement("div");
       b.className = "bubble-assistant";
+      b.dataset.raw = it.text || "";  // for the Copy action (markdown source)
       const c = document.createElement("div");
       c.className = "md";
       c.innerHTML = md(it.text);
@@ -587,8 +599,46 @@ function newAssistantBlock() {
   hideWelcome();
   const wrap = document.createElement("div");
   wrap.className = "msg msg-assistant";
+  const bar = document.createElement("div");
+  bar.className = "msg-actions";
+  bar.innerHTML =
+    `<button class="msg-act msg-copy" title="Copy reply" aria-label="Copy reply">${COPY_SVG}</button>` +
+    `<button class="msg-act msg-regen" title="Regenerate reply" aria-label="Regenerate reply">${RELOAD_SVG}</button>`;
+  bar.querySelector(".msg-copy").addEventListener("click", () => copyTurn(wrap));
+  bar.querySelector(".msg-regen").addEventListener("click", () => regenerateTurn(wrap));
+  wrap.appendChild(bar);
   chatEl.appendChild(wrap);
   return wrap;
+}
+
+function copyTurn(wrap) {
+  const parts = [...wrap.querySelectorAll(".bubble-assistant")]
+    .map((b) => b.dataset.raw || b.textContent || "");
+  const text = parts.join("\n\n").trim();
+  if (!text) { toast("Nothing to copy yet.", "warn", 2000); return; }
+  copyText(text)
+    .then(() => toast("Reply copied.", "info", 1500))
+    .catch(() => toast("Couldn't copy to clipboard.", "error", 3000));
+}
+
+async function regenerateTurn(wrap) {
+  if (busy) { toast("Wait for the current turn to finish first.", "warn", 3000); return; }
+  // The prompt for this reply is the nearest user bubble before this turn.
+  let el = wrap.previousElementSibling;
+  while (el && !el.classList.contains("msg-user")) el = el.previousElementSibling;
+  if (!el) { toast("No prompt to regenerate from.", "warn", 2500); return; }
+  const raw = el.dataset.rawText || "";
+  const ordinal = [...document.querySelectorAll(".msg-user")].indexOf(el);
+  let res;
+  try { res = await api().rewind_to(ordinal); }
+  catch (e) { toast("Bridge error: " + e, "error", 5000); return; }
+  if (res && res.error) { toast(res.error, "error", 5000); return; }
+  // Rewound to just before the prompt (files reverted too) -- resend it as-is.
+  clearChatDom();
+  renderHistory(res.items, res.todos);
+  input.value = raw;
+  input.style.height = "auto";
+  sendMessage();
 }
 
 function ensureTurn() {
@@ -739,7 +789,10 @@ function handle(ev) {
         }
         if (current.contentEl) {
           current.contentEl.innerHTML = md(current.content);
-        } else if (current.content === "" && !current.wrap.hasChildNodes()) {
+          if (current.contentEl.parentElement)
+            current.contentEl.parentElement.dataset.raw = current.content;
+        } else if (current.content === "" && current.wrap.children.length <= 1) {
+          // Only the .msg-actions bar -> the turn produced nothing; drop it.
           current.wrap.remove();
           current = null;
           break;
@@ -2109,6 +2162,7 @@ function refreshModelFoot(res) {
 }
 
 const PENCIL_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.83 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>';
+const COPY_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>';
 const CROSS_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>';
 
 function apiRowSub(p) {

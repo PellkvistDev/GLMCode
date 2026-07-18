@@ -653,7 +653,24 @@ body.subagent-open #subagent-panel { transform: translateX(0); }
   color: rgba(255, 255, 255, 0.7);
 }
 
-.msg-assistant { align-items: flex-start; }
+.msg-assistant { align-items: flex-start; position: relative; padding-bottom: 4px; }
+/* hover-revealed Copy / Regenerate actions under an assistant turn */
+.msg-actions {
+  position: absolute; bottom: -8px; left: 2px; display: flex; gap: 4px;
+  opacity: 0; transition: opacity 0.15s ease; z-index: 3;
+}
+.msg-assistant:hover .msg-actions { opacity: 1; }
+.msg-act {
+  width: 26px; height: 26px; border-radius: 7px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--text-faint); background: var(--glass-strong);
+  border: 1px solid var(--stroke-soft); cursor: pointer;
+  transition: color 0.15s ease, background 0.15s ease;
+}
+.msg-act svg { width: 14px; height: 14px; }
+.msg-act:hover { color: var(--text); background: var(--glass-hi); }
+/* sub-agent threads reuse .msg-assistant but have no action bar of their own */
+.subagent-thread { padding-bottom: 0; }
 .bubble-assistant {
   max-width: 94%;
   background: rgba(20, 26, 42, 0.72);
