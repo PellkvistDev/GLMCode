@@ -163,15 +163,42 @@ document.addEventListener("click", async (e) => {
   }
 });
 
+// Expand/collapse a long fenced block (see md(): blocks over ~a screenful
+// render clamped with a "Show all" toggle so pasted files/diffs stay small).
+document.addEventListener("click", (e) => {
+  const more = e.target.closest(".code-more");
+  if (!more) return;
+  const wrap = more.closest(".code-clamp");
+  if (!wrap) return;
+  const expanded = wrap.classList.toggle("expanded");
+  more.setAttribute("aria-expanded", expanded ? "true" : "false");
+  more.textContent = expanded ? "Show less" : `Show all ${more.dataset.lines} lines`;
+});
+
 /* Minimal markdown renderer (safe: escapes first, then adds structure). */
 function md(src) {
   const codeBlocks = [];
   src = String(src ?? "");
   // fenced code blocks out first
   src = src.replace(/```([\w+-]*)\n?([\s\S]*?)(?:```|$)/g, (_, lang, code) => {
+    const body = code.replace(/\n$/, "");
+    const lc = (lang || "").toLowerCase();
+    // A fenced diff/patch (explicitly tagged, or an untagged block that
+    // clearly *is* one) gets real +/- coloring instead of syntax highlighting.
+    const isDiff = lc === "diff" || lc === "patch" ||
+      (lc === "" && /^(@@ |diff --git |[-+]{3} )/m.test(body));
+    const inner = isDiff ? colorDiff(body) : highlight(body, lang);
+    // Long pastes (whole files, big diffs) dominate the chat, so anything
+    // past a screenful collapses to a preview with a one-click "Show all".
+    const nLines = body.split("\n").length;
+    const tall = nLines > 16;
+    const cls = "code-wrap" + (isDiff ? " code-diff" : "") + (tall ? " code-clamp" : "");
+    const more = tall
+      ? `<button class="code-more" data-lines="${nLines}" aria-expanded="false">Show all ${nLines} lines</button>`
+      : "";
     codeBlocks.push(
-      `<div class="code-wrap"><button class="code-copy" title="Copy code" aria-label="Copy code">Copy</button>` +
-      `<pre><code data-lang="${esc(lang)}">${highlight(code.replace(/\n$/, ""), lang)}</code></pre></div>`);
+      `<div class="${cls}"><button class="code-copy" title="Copy code" aria-label="Copy code">Copy</button>` +
+      `<pre><code data-lang="${esc(lang)}">${inner}</code></pre>${more}</div>`);
     return `\u0000${codeBlocks.length - 1}\u0000`;
   });
   src = esc(src);
@@ -363,6 +390,15 @@ function buildToolEl(name, args, callId) {
   return el;
 }
 
+function diffStat(text) {
+  let add = 0, del = 0;
+  for (const l of text.split("\n")) {
+    if (l.startsWith("+") && !l.startsWith("+++")) add++;
+    else if (l.startsWith("-") && !l.startsWith("---")) del++;
+  }
+  return [add, del];
+}
+
 function finishToolEl(el, content, isError) {
   el.classList.remove("running");
   const sb = el.querySelector(".tool-stop");
@@ -371,7 +407,19 @@ function finishToolEl(el, content, isError) {
   el.querySelector(".tool-state").textContent = isError ? "error" : "done";
   const body = el.querySelector(".tool-body");
   const c = content || "(empty)";
-  body.innerHTML = /^(---|\+\+\+|@@)/m.test(c) ? colorDiff(c) : esc(c);
+  const isDiff = /^(---|\+\+\+|@@)/m.test(c);
+  body.innerHTML = isDiff ? colorDiff(c) : esc(c);
+  // A diff result shows its magnitude (+added / -removed) right in the
+  // collapsed header, so you can gauge the change without expanding it.
+  if (isDiff && !el.querySelector(".diff-stat")) {
+    const [add, del] = diffStat(c);
+    if (add || del) {
+      const badge = document.createElement("span");
+      badge.className = "diff-stat";
+      badge.innerHTML = `<span class="ds-add">+${add}</span><span class="ds-del">−${del}</span>`;
+      el.querySelector(".tool-sum").after(badge);
+    }
+  }
   if (isError) el.classList.add("open");
 }
 
