@@ -12,7 +12,7 @@ import pytest
 # glmcode.gui.app imports `webview` at module level; stub it so these tests
 # run anywhere (CI has no pywebview).
 sys.modules.setdefault("webview", types.SimpleNamespace(
-    Window=object, FOLDER_DIALOG=object(), OPEN_DIALOG=object()))
+    Window=object, FOLDER_DIALOG=object(), OPEN_DIALOG=object(), SAVE_DIALOG=object()))
 
 from glmcode.gui.app import WebEvents  # noqa: E402
 

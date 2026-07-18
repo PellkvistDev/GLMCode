@@ -1618,6 +1618,102 @@ input.addEventListener("keydown", (e) => {
   else if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closeMentionMenu(); }
 }, true);
 
+/* ---- slash commands (/) ----------------------------------------------- --
+   Type / at the start of the composer to run a built-in action or one of
+   your saved prompt commands. Menu is discovery; the actual dispatch happens
+   on send (so `/review focus on auth` works when typed out and Entered). */
+let slashCommands = [];  // custom {name, template} from the backend
+let slash = { open: false, items: [], sel: 0 };
+
+const BUILTIN_COMMANDS = [
+  { name: "plan", hint: "plan the task before touching anything", builtin: true },
+  { name: "compact", hint: "summarize older history to free context", builtin: true },
+  { name: "new", hint: "start a fresh chat in this project", builtin: true },
+];
+
+function allSlashCommands() {
+  return BUILTIN_COMMANDS.concat(
+    (slashCommands || []).map((c) => ({ name: c.name, hint: c.template, template: c.template })));
+}
+
+function slashContext() {
+  const m = /^\/([\w-]*)$/.exec(input.value); // only "/word" with nothing after
+  return m ? { query: m[1].toLowerCase() } : null;
+}
+
+function updateSlashMenu() {
+  const ctx = slashContext();
+  if (!ctx) { closeSlashMenu(); return; }
+  slash.items = allSlashCommands().filter((c) => c.name.toLowerCase().startsWith(ctx.query));
+  if (!slash.items.length) { closeSlashMenu(); return; }
+  slash.sel = 0; slash.open = true;
+  renderSlashMenu();
+  $("slash-menu").hidden = false;
+}
+
+function renderSlashMenu() {
+  const menu = $("slash-menu");
+  menu.innerHTML = "";
+  slash.items.forEach((c, i) => {
+    const row = document.createElement("button");
+    row.className = "mention-opt" + (i === slash.sel ? " sel" : "");
+    row.setAttribute("role", "option");
+    row.innerHTML = `<span class="mention-base"></span><span class="mention-dir"></span>`;
+    row.querySelector(".mention-base").textContent = "/" + c.name;
+    row.querySelector(".mention-dir").textContent =
+      (c.builtin ? "" : "custom · ") + (c.hint || "").replace(/\s+/g, " ").slice(0, 70);
+    row.addEventListener("mousedown", (e) => { e.preventDefault(); chooseSlash(i); });
+    menu.appendChild(row);
+  });
+}
+
+function moveSlashSel(d) {
+  slash.sel = (slash.sel + d + slash.items.length) % slash.items.length;
+  renderSlashMenu();
+  const el = $("slash-menu").children[slash.sel];
+  if (el) el.scrollIntoView({ block: "nearest" });
+}
+
+function chooseSlash(i) {
+  const c = slash.items[i];
+  if (!c) return;
+  closeSlashMenu();
+  input.value = "/" + c.name + " ";   // tab-complete; Enter dispatches it
+  input.focus();
+  input.dispatchEvent(new Event("input"));
+}
+
+function closeSlashMenu() { slash.open = false; $("slash-menu").hidden = true; }
+
+// Returns {send} (send this text), {consumed} (handled, nothing to send),
+// or null (unknown command -- send as a normal message).
+function dispatchSlash(name, args) {
+  const custom = (slashCommands || []).find((c) => c.name === name);
+  if (custom) {
+    let t = custom.template;
+    if (t.includes("$INPUT")) t = t.split("$INPUT").join(args);
+    else if (args) t = t + "\n\n" + args;
+    return { send: t.trim() };
+  }
+  if (name === "plan") {
+    setPlanMode(true);
+    return args ? { send: args } : { consumed: true };
+  }
+  if (name === "compact") { $("compact-btn").click(); return { consumed: true }; }
+  if (name === "new" || name === "clear") { $("chat-clear").click(); return { consumed: true }; }
+  return null;
+}
+
+input.addEventListener("input", updateSlashMenu);
+input.addEventListener("blur", () => setTimeout(closeSlashMenu, 120));
+input.addEventListener("keydown", (e) => {
+  if (!slash.open) return;
+  if (e.key === "ArrowDown") { e.preventDefault(); e.stopImmediatePropagation(); moveSlashSel(1); }
+  else if (e.key === "ArrowUp") { e.preventDefault(); e.stopImmediatePropagation(); moveSlashSel(-1); }
+  else if (e.key === "Enter" || e.key === "Tab") { e.preventDefault(); e.stopImmediatePropagation(); chooseSlash(slash.sel); }
+  else if (e.key === "Escape") { e.preventDefault(); e.stopImmediatePropagation(); closeSlashMenu(); }
+}, true);
+
 function setBusy(b) {
   busy = b;
   $("stop-btn").hidden = !b;
@@ -1683,6 +1779,16 @@ $("steer-queued-delete").addEventListener("click", async () => {
 });
 
 async function sendMessage() {
+  // Slash command dispatch (only when idle and the whole input is /cmd …).
+  if (!busy) {
+    const sm = /^\/([\w-]+)(?:\s+([\s\S]*))?$/.exec(input.value.trim());
+    if (sm) {
+      const r = dispatchSlash(sm[1], (sm[2] || "").trim());
+      if (r && r.consumed) { input.value = ""; input.style.height = "auto"; closeSlashMenu(); return; }
+      if (r && r.send != null) { input.value = r.send; input.style.height = "auto"; closeSlashMenu(); }
+      // r === null -> unknown command; fall through and send it verbatim.
+    }
+  }
   const text = input.value.trim();
   if (busy) {
     // Don't interrupt the running turn -- queue this as a steering message.
@@ -1745,15 +1851,16 @@ $("stop-btn").addEventListener("click", () => api().cancel());
 
 /* --------------------------------------------------------- plan mode -- */
 let planMode = false;
-$("plan-toggle").addEventListener("click", () => {
-  planMode = !planMode;
+function setPlanMode(on) {
+  planMode = !!on;
   $("plan-toggle").classList.toggle("on", planMode);
   $("plan-toggle").setAttribute("aria-pressed", String(planMode));
   input.placeholder = planMode
     ? "Describe the task — the agent will plan it before touching anything…"
-    : "Ask anything about your code…";
+    : "Ask anything…  (type @ to add a file)";
   if (!planMode) $("plan-actions").hidden = true;
-});
+}
+$("plan-toggle").addEventListener("click", () => setPlanMode(!planMode));
 $("plan-dismiss").addEventListener("click", () => { $("plan-actions").hidden = true; });
 $("plan-execute").addEventListener("click", async () => {
   if (busy) return;
@@ -2268,6 +2375,43 @@ $("mcp-add").addEventListener("click", async () => {
   setTimeout(populateMcp, 3000); // refresh once it has had a moment to boot
 });
 
+/* ---- custom slash commands (Settings) --------------------------------- */
+
+function renderCommandsList(res) {
+  slashCommands = (res && res.commands) || [];
+  const list = $("commands-list");
+  list.innerHTML = "";
+  for (const c of slashCommands) {
+    const row = document.createElement("div");
+    row.className = "provider-row";
+    row.innerHTML =
+      `<div class="provider-row-text"><span class="provider-name"></span>` +
+      `<span class="provider-sub"></span></div>` +
+      `<button class="icon-btn-mini cmd-del" title="Delete">${CROSS_SVG}</button>`;
+    row.querySelector(".provider-name").textContent = "/" + c.name;
+    row.querySelector(".provider-sub").textContent = c.template.replace(/\s+/g, " ").slice(0, 80);
+    row.querySelector(".cmd-del").addEventListener("click", async () => {
+      renderCommandsList(await api().delete_command(c.name));
+    });
+    list.appendChild(row);
+  }
+  if (!list.children.length) {
+    list.innerHTML = '<div class="row-sub">No custom commands yet.</div>';
+  }
+}
+
+async function populateCommands() {
+  try { renderCommandsList(await api().commands()); } catch (e) { /* ignore */ }
+}
+
+$("cmd-add").addEventListener("click", async () => {
+  const res = await api().add_command($("cmd-name").value, $("cmd-template").value);
+  if (res && res.error) { toast(res.error, "error", 5000); return; }
+  $("cmd-name").value = ""; $("cmd-template").value = "";
+  renderCommandsList(res);
+  toast("Command saved — run it with /name in the composer.", "info", 3500);
+});
+
 $("prov-detect").addEventListener("click", async () => {
   const res = await api().detect_local_providers();
   if (res && res.error) { toast(res.error, "error", 6000); return; }
@@ -2374,6 +2518,7 @@ $("settings-btn").addEventListener("click", async () => {
   populateBackups();
   populateModelPicker();
   populateMcp();
+  populateCommands();
 });
 $("settings-close").addEventListener("click", () => { $("settings-backdrop").hidden = true; });
 $("settings-backdrop").addEventListener("click", (e) => {
@@ -2731,6 +2876,7 @@ function paletteAllItems() {
                hint: busy ? "interrupt the running turn" : "explore read-only, then propose a plan",
                run: () => (busy ? $("stop-btn") : $("plan-toggle")).click() });
   items.push({ label: "Compact conversation", hint: "summarize older history", run: () => $("compact-btn").click() });
+  items.push({ label: "Export chat to Markdown…", hint: "save this conversation", run: () => exportChat() });
   items.push({ label: "Settings", hint: "", run: () => $("settings-btn").click() });
   items.push({ label: "Toggle sidebar", hint: "chat history", run: () => $("sidebar-toggle").click() });
   for (const s of sessions || []) {
@@ -2785,6 +2931,14 @@ function filterPalette() {
   renderPalette();
 }
 
+async function exportChat() {
+  try {
+    const res = await api().export_chat();
+    if (res && res.error) toast(res.error, "error", 5000);
+    else if (res && res.ok) toast("Saved to " + res.path, "info", 5000);
+  } catch (e) { toast("Bridge error: " + e, "error", 5000); }
+}
+
 function openPalette() {
   $("palette-backdrop").hidden = false;
   $("palette-input").value = "";
@@ -2831,6 +2985,7 @@ async function boot() {
   applyPerfMode();  // before first paint of the session, so no heavy-then-flat flash
   sessions = b.sessions || [];
   if (b.contextLimit) contextLimit = b.contextLimit;
+  try { const c = await api().commands(); slashCommands = (c && c.commands) || []; } catch (e) { /* ignore */ }
   setBackground(b.background);
   $("about-version").textContent = "v" + b.version;
   syncSettingsUI();

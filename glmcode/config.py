@@ -143,6 +143,10 @@ class Config:
     # line for a stdio MCP server (e.g. "npx -y @modelcontextprotocol/
     # server-filesystem C:\\projects"). Managed in Settings -> MCP servers.
     mcp_servers: list = field(default_factory=list)
+    # Custom slash commands: [{"name", "template"}] reusable prompts invoked
+    # with /name in the composer. $INPUT in the template is replaced by any
+    # text typed after the command (else appended).
+    commands: list = field(default_factory=list)
 
     extra: dict = field(default_factory=dict)
 

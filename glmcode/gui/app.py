@@ -936,6 +936,70 @@ class Api:
             self._save_current()
         return self.providers()
 
+    # -- custom slash commands --------------------------------------------- #
+
+    def commands(self):
+        return {"commands": list(self._cfg.commands)}
+
+    def add_command(self, name: str, template: str):
+        name = (name or "").strip().lstrip("/").strip()
+        template = (template or "").strip()
+        if not name or not template:
+            return {"error": "both a name and a prompt template are required"}
+        if not name.replace("-", "").replace("_", "").isalnum():
+            return {"error": "name may only contain letters, numbers, - and _"}
+        self._cfg.commands = [c for c in self._cfg.commands if c.get("name") != name]
+        self._cfg.commands.append({"name": name, "template": template})
+        save_config(self._cfg)
+        return self.commands()
+
+    def delete_command(self, name: str):
+        self._cfg.commands = [c for c in self._cfg.commands if c.get("name") != name]
+        save_config(self._cfg)
+        return self.commands()
+
+    # -- export ------------------------------------------------------------ #
+
+    def export_chat(self):
+        """Save the active chat as a Markdown file (via a Save dialog)."""
+        cs = self._active
+        if not cs:
+            return {"error": "no active chat"}
+        title = cs.title or "chat"
+        safe = re.sub(r"[^\w -]+", "", title).strip() or "chat"
+        try:
+            picked = self._window.create_file_dialog(
+                webview.SAVE_DIALOG, save_filename=f"{safe}.md")
+        except Exception as e:
+            return {"error": str(e)}
+        if not picked:
+            return {"cancelled": True}
+        path = Path(picked if isinstance(picked, str) else picked[0])
+        try:
+            path.write_text(self._chat_markdown(cs), encoding="utf-8")
+        except OSError as e:
+            return {"error": str(e)}
+        return {"ok": True, "path": str(path)}
+
+    def _chat_markdown(self, cs: "ChatState") -> str:
+        lines = [f"# {cs.title or 'Conversation'}", "",
+                 f"*Project: {cs.agent.workdir}*", ""]
+        for it in to_display(cs.agent.messages):
+            kind = it.get("kind")
+            if kind == "user":
+                lines += ["---", "", "### You", "", it.get("text", ""), ""]
+            elif kind == "assistant":
+                lines += ["### Agent", "", it.get("text", ""), ""]
+            elif kind == "tool":
+                args = it.get("args", {})
+                summary = ", ".join(f"{k}={v}" for k, v in list(args.items())[:3])
+                lines += [f"> 🔧 `{it.get('name')}`" + (f" ({summary})" if summary else ""), ""]
+            elif kind == "compacted":
+                lines += ["> *— context compacted —*", ""]
+            elif kind == "steered":
+                lines += [f"> ↪ *steered:* {it.get('text', '')}", ""]
+        return "\n".join(lines).rstrip() + "\n"
+
     # -- MCP servers ------------------------------------------------------- #
 
     def mcp_status(self):

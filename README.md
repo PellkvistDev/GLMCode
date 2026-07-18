@@ -87,9 +87,15 @@ break until you regenerate them) — or if `requirements.txt` changed.
   chats in different projects can't touch each other's files, and each keeps
   its own task checklist. If a background chat needs a permission answer, it
   waits patiently and asks the moment you switch back to it.
+- **Slash commands** — type `/` in the composer for built-in actions (`/plan`,
+  `/compact`, `/new`) and your own **saved prompts**. Define reusable prompts in
+  **Settings → APIs → Slash commands** (use `$INPUT` for text you type after the
+  command) and fire them with `/name` — e.g. `/review the auth module`.
 - **Command palette (Ctrl/⌘+K)** — fuzzy-jump to any action (new chat, plan mode,
-  compact, settings, stop), open any past chat, or switch the model, all from the
-  keyboard.
+  compact, export, settings, stop), open any past chat, or switch the model, all
+  from the keyboard.
+- **Export chat to Markdown** — save any conversation to a `.md` file from the
+  command palette.
 - **MCP servers** — connect any [Model Context Protocol](https://modelcontextprotocol.io)
   server (stdio: `npx`, `uvx`, a script) in **Settings → APIs → MCP servers**, and
   its tools appear to the agent alongside the built-in ones, permission-gated like

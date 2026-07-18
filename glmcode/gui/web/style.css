@@ -1168,6 +1168,22 @@ body.no-session #composer, body.no-session #attach-btn, body.no-session #compose
 .mcp-dot { flex: none; width: 9px; height: 9px; border-radius: 50%; }
 .mcp-dot.on { background: var(--green); }
 .mcp-dot.off { background: var(--text-faint); }
+
+/* custom slash-commands editor (same shell as the MCP editor) */
+#commands-editor {
+  margin: 4px 0 12px; border: 1px solid var(--stroke-soft); border-radius: var(--r-sm);
+  background: rgba(255, 255, 255, 0.03); overflow: hidden;
+}
+#commands-editor > summary {
+  list-style: none; cursor: pointer; padding: 9px 12px;
+  font-size: 12.5px; font-weight: 600; color: var(--text-dim);
+}
+#commands-editor > summary::-webkit-details-marker { display: none; }
+#commands-editor > summary:hover { color: var(--text); }
+#commands-editor > .row-sub { padding: 0 12px 6px; display: block; }
+#commands-editor .provider-list, #commands-editor .provider-form { padding-left: 12px; padding-right: 12px; }
+#commands-editor .provider-form { padding-bottom: 12px; display: flex; flex-direction: column; gap: 7px; }
+#cmd-template { resize: vertical; min-height: 56px; font-family: var(--font); line-height: 1.45; }
 .provider-row-text { flex: 1; min-width: 0; display: flex; flex-direction: column; }
 .provider-name { font-weight: 600; color: var(--text); }
 .provider-sub {

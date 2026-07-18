@@ -6,7 +6,7 @@ import sys
 import types
 
 sys.modules.setdefault("webview", types.SimpleNamespace(
-    Window=object, FOLDER_DIALOG=object(), OPEN_DIALOG=object()))
+    Window=object, FOLDER_DIALOG=object(), OPEN_DIALOG=object(), SAVE_DIALOG=object()))
 
 from glmcode.gui import app as gui_app  # noqa: E402
 

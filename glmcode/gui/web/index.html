@@ -115,6 +115,7 @@
     <button id="plan-dismiss" class="btn btn-ghost">Dismiss</button>
   </div>
   <div id="mention-menu" class="mention-menu" role="listbox" hidden></div>
+  <div id="slash-menu" class="mention-menu" role="listbox" hidden></div>
   <div id="palette-backdrop" class="backdrop" hidden>
     <div id="palette" role="dialog" aria-label="Command palette">
       <input id="palette-input" type="text" placeholder="Type a command, chat, or model…"
@@ -354,6 +355,21 @@
           <input id="mcp-command" class="text-input" placeholder="Command (npx / uvx / python …)">
           <div class="sheet-actions">
             <button id="mcp-add" class="btn btn-primary">Add server</button>
+          </div>
+        </div>
+      </details>
+      <details id="commands-editor">
+        <summary>Slash commands — reusable prompts…</summary>
+        <p class="row-sub">Save a prompt you use often, then run it in the composer with
+           <code>/name</code>. Use <code>$INPUT</code> in the template to drop in text you
+           type after the command (otherwise it's appended).</p>
+        <div id="commands-list" class="provider-list"></div>
+        <div class="provider-form">
+          <input id="cmd-name" class="text-input" placeholder="Name (e.g. review)">
+          <textarea id="cmd-template" class="text-input" rows="3"
+            placeholder="Prompt template — e.g. Review my recent changes for bugs and edge cases. Focus on: $INPUT"></textarea>
+          <div class="sheet-actions">
+            <button id="cmd-add" class="btn btn-primary">Save command</button>
           </div>
         </div>
       </details>
