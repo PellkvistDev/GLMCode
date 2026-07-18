@@ -44,6 +44,16 @@ def test_call_roundtrip(manager):
     assert out == "HELLO MCP"
 
 
+def test_large_result_is_capped(manager):
+    """An MCP server returning a huge blob must NOT dump it all into context
+    -- results are capped like every built-in tool (regression: an uncapped
+    filesystem read once ballooned a chat to ~1.5M tokens)."""
+    from glmcode.tools import MAX_TOOL_OUTPUT
+    out = manager.call("mcp_fake_echo", {"text": "a" * 500_000})
+    assert len(out) <= MAX_TOOL_OUTPUT + 100
+    assert "truncated" in out
+
+
 def test_unknown_tool_and_dead_server_raise(manager):
     with pytest.raises(ToolErrorBase):
         manager.call("mcp_fake_nope", {})

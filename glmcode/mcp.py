@@ -21,7 +21,7 @@ import threading
 import time
 from dataclasses import dataclass, field
 
-from .tools import NO_WINDOW_KWARGS
+from .tools import NO_WINDOW_KWARGS, MAX_TOOL_OUTPUT, _truncate
 from .errors import ToolError as ToolErrorBase, ErrorSeverity
 
 PROTOCOL_VERSION = "2025-03-26"
@@ -205,6 +205,13 @@ class McpServer:
             elif kind == "image":
                 parts.append("[image content returned -- not displayable here]")
         out = "\n".join(p for p in parts if p) or "(no content returned)"
+        # CRITICAL: cap the result like every built-in tool does. An MCP
+        # server can return megabytes (a big read_file, a recursive
+        # directory_tree) and the raw text goes straight into the model's
+        # context -- an uncapped result silently ballooned a chat to 1.5M
+        # tokens once. The chat only DISPLAYS a truncated slice, so an
+        # oversized result looks small but isn't.
+        out = _truncate(out, MAX_TOOL_OUTPUT)
         if result.get("isError"):
             raise ToolErrorBase(out, ErrorSeverity.ERROR)
         return out
