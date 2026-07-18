@@ -87,6 +87,10 @@ break until you regenerate them) — or if `requirements.txt` changed.
   chats in different projects can't touch each other's files, and each keeps
   its own task checklist. If a background chat needs a permission answer, it
   waits patiently and asks the moment you switch back to it.
+- **Drag & drop attachments** — drop files or images anywhere on the window to
+  attach them to your next message; same pipeline as the paperclip.
+- **Prompt history** — press ↑ in the (empty) composer to recall your previous
+  messages, terminal-style, per chat. ↓ walks back toward what you were typing.
 - **@-mention files** — type `@` in the composer to fuzzy-search your project's
   files; pick one and its current contents are attached to your message, so the
   agent works from the exact code instead of hunting for it (or burning a turn

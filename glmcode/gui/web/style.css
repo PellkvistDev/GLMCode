@@ -835,6 +835,20 @@ body.subagent-open #subagent-panel { transform: translateX(0); }
 }
 body.sidebar-open #composer-wrap { left: var(--sidebar-w); }
 
+/* full-window drop target shown while dragging files over the app */
+#drop-overlay {
+  position: fixed; inset: 0; z-index: var(--z-toast);
+  display: flex; align-items: center; justify-content: center;
+  background: rgba(6, 10, 22, 0.72);
+  border: 2px dashed var(--accent); border-radius: 14px;
+  pointer-events: none; /* never intercept the drop itself */
+}
+.drop-inner {
+  display: flex; flex-direction: column; align-items: center; gap: 10px;
+  color: var(--text); font-size: 15px; font-weight: 650;
+}
+.drop-inner svg { width: 40px; height: 40px; color: var(--accent); }
+
 /* @-mention file picker: sits as a flex item directly above the composer */
 .mention-menu {
   max-height: 240px; overflow-y: auto;

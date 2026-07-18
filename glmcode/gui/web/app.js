@@ -1186,7 +1186,10 @@ function renderSubagentEvent(aid, ev) {
       break;
     }
     case "tool_call": {
-      const el = buildToolEl(ev.name, ev.args || {});
+      // call_id makes shell commands stoppable here too -- the foreground
+      // process registry is process-global, so the same Stop plumbing the
+      // main chat uses reaches a sub-agent's hung `npm run dev` as well.
+      const el = buildToolEl(ev.name, ev.args || {}, ev.call_id || "");
       t.wrap.appendChild(el);
       t.lastTool = el;
       break;
@@ -1542,6 +1545,67 @@ function closeMentionMenu() {
   $("mention-menu").hidden = true;
 }
 
+/* ---- composer prompt history (ArrowUp / ArrowDown) -------------------- --
+   Terminal-style recall of your previous messages, per chat. ArrowUp only
+   takes over when it can't mean cursor movement (empty input, or caret at
+   position 0); ArrowDown walks back toward the draft you were typing. */
+let histIdx = null;   // null = not navigating
+let histDraft = "";
+let histApplying = false;
+
+function histKey() { return "mnm-hist-" + (activeSessionId || "none"); }
+function histList() {
+  try { return JSON.parse(localStorage.getItem(histKey()) || "[]"); }
+  catch (e) { return []; }
+}
+function histPush(text) {
+  try {
+    const h = histList();
+    if (h[h.length - 1] !== text) h.push(text);
+    localStorage.setItem(histKey(), JSON.stringify(h.slice(-50)));
+  } catch (e) { /* localStorage unavailable -- history just won't persist */ }
+  histIdx = null;
+}
+function histApply(v) {
+  histApplying = true;
+  input.value = v;
+  input.dispatchEvent(new Event("input")); // re-grow height
+  histApplying = false;
+  const end = input.value.length;
+  input.setSelectionRange(end, end);
+}
+
+input.addEventListener("keydown", (e) => {
+  if (mention.open) return; // the mention menu owns the arrows while open
+  if (e.key === "ArrowUp") {
+    const h = histList();
+    if (!h.length) return;
+    if (histIdx === null) {
+      if (input.value !== "" && input.selectionStart !== 0) return; // normal cursor move
+      histDraft = input.value;
+      histIdx = h.length - 1;
+    } else if (histIdx > 0) {
+      histIdx--;
+    } else {
+      e.preventDefault();
+      return; // already at the oldest entry
+    }
+    e.preventDefault();
+    histApply(h[histIdx]);
+  } else if (e.key === "ArrowDown" && histIdx !== null) {
+    const h = histList();
+    e.preventDefault();
+    if (histIdx < h.length - 1) {
+      histIdx++;
+      histApply(h[histIdx]);
+    } else {
+      histIdx = null;
+      histApply(histDraft); // back to whatever was being typed
+    }
+  }
+});
+input.addEventListener("input", () => { if (!histApplying) histIdx = null; });
+
 input.addEventListener("input", scheduleMentionUpdate);
 input.addEventListener("blur", () => setTimeout(closeMentionMenu, 120));
 // Capture phase so this runs BEFORE the Enter-to-send handler above: while the
@@ -1629,6 +1693,7 @@ async function sendMessage() {
       toast("A steering message is already queued -- edit or remove it first.", "warn", 4000);
       return;
     }
+    histPush(text);
     input.value = "";
     input.style.height = "auto";
     steerPending = text;
@@ -1648,6 +1713,7 @@ async function sendMessage() {
     return;
   }
   if (!text && attachments.length === 0) return;
+  if (text) histPush(text);
   const plan = planMode && !!text;
   const imgs = attachments.slice();
   addUserMessage(text || (imgs.length === 1 ? "(file attached)" : "(files attached)"), imgs, "", plan);
@@ -1718,6 +1784,54 @@ $("attach-btn").addEventListener("click", async () => {
   if (picked && picked.length) {
     attachments.push(...picked);
     renderAttachments();
+  }
+});
+
+/* ---- drag & drop attachments ------------------------------------------ --
+   Drop files anywhere on the window to attach them. pywebview exposes each
+   dropped File's real disk path as `pywebviewFullPath`; the backend turns
+   those into the same {path, name, thumb} shape pick_files returns. */
+let dragDepth = 0; // dragenter/leave fire per descendant element -- count them
+
+function dropOverlay(show) {
+  $("drop-overlay").hidden = !show;
+}
+
+window.addEventListener("dragenter", (e) => {
+  if (!e.dataTransfer || ![...(e.dataTransfer.types || [])].includes("Files")) return;
+  e.preventDefault();
+  dragDepth++;
+  dropOverlay(true);
+});
+window.addEventListener("dragover", (e) => {
+  if (!e.dataTransfer || ![...(e.dataTransfer.types || [])].includes("Files")) return;
+  e.preventDefault();
+});
+window.addEventListener("dragleave", (e) => {
+  if ($("drop-overlay").hidden) return;
+  dragDepth = Math.max(0, dragDepth - 1);
+  if (dragDepth === 0) dropOverlay(false);
+});
+window.addEventListener("drop", async (e) => {
+  e.preventDefault();
+  dragDepth = 0;
+  dropOverlay(false);
+  const files = [...((e.dataTransfer && e.dataTransfer.files) || [])];
+  if (!files.length) return;
+  const paths = files.map((f) => f.pywebviewFullPath).filter(Boolean);
+  if (!paths.length) {
+    toast("Couldn't read the dropped files' paths.", "warn", 3500);
+    return;
+  }
+  try {
+    const atts = await api().attach_paths(paths);
+    if (atts && atts.length) {
+      attachments.push(...atts);
+      renderAttachments();
+      input.focus();
+    }
+  } catch (err) {
+    toast("Bridge error: " + err, "error", 5000);
   }
 });
 

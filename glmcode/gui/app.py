@@ -1302,6 +1302,20 @@ class Api:
                         "thumb": _thumb_uri(path) if is_image else ""})
         return out
 
+    def attach_paths(self, paths: list):
+        """Turn dropped-file paths (drag & drop onto the window) into the
+        same attachment shape pick_files returns, so the composer pipeline
+        treats them identically."""
+        out = []
+        for p in paths or []:
+            path = Path(str(p))
+            if not path.is_file():
+                continue
+            is_image = path.suffix.lower() in IMAGE_EXTENSIONS
+            out.append({"path": str(path), "name": path.name,
+                        "thumb": _thumb_uri(path) if is_image else ""})
+        return out
+
     def list_project_files(self, query: str = ""):
         """Fuzzy file search in the active chat's project, for the composer's
         @-mention picker. Fast (the file list is cached per folder)."""
