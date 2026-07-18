@@ -184,21 +184,34 @@ function md(src) {
     const body = code.replace(/\n$/, "");
     const lc = (lang || "").toLowerCase();
     // A fenced diff/patch (explicitly tagged, or an untagged block that
-    // clearly *is* one) gets real +/- coloring instead of syntax highlighting.
+    // clearly *is* one) collapses into a tiny one-line box -- click to
+    // expand the git-colored +/- view. Keeps big diffs out of the way.
     const isDiff = lc === "diff" || lc === "patch" ||
       (lc === "" && /^(@@ |diff --git |[-+]{3} )/m.test(body));
-    const inner = isDiff ? colorDiff(body) : highlight(body, lang);
-    // Long pastes (whole files, big diffs) dominate the chat, so anything
+    if (isDiff) {
+      const [add, del] = diffStat(body);
+      codeBlocks.push(
+        `<details class="diff-box">` +
+        `<summary><span class="diff-box-icon">±</span>` +
+        `<span class="diff-box-label">Diff</span>` +
+        `<span class="diff-stat"><span class="ds-add">+${add}</span><span class="ds-del">−${del}</span></span>` +
+        `<span class="diff-box-hint">— click to view</span></summary>` +
+        `<div class="code-wrap code-diff">` +
+        `<button class="code-copy" title="Copy code" aria-label="Copy code">Copy</button>` +
+        `<pre><code data-lang="${esc(lang)}">${colorDiff(body)}</code></pre></div></details>`);
+      return ` ${codeBlocks.length - 1} `;
+    }
+    // Long non-diff pastes (whole files) still dominate the chat, so anything
     // past a screenful collapses to a preview with a one-click "Show all".
     const nLines = body.split("\n").length;
     const tall = nLines > 16;
-    const cls = "code-wrap" + (isDiff ? " code-diff" : "") + (tall ? " code-clamp" : "");
+    const cls = "code-wrap" + (tall ? " code-clamp" : "");
     const more = tall
       ? `<button class="code-more" data-lines="${nLines}" aria-expanded="false">Show all ${nLines} lines</button>`
       : "";
     codeBlocks.push(
       `<div class="${cls}"><button class="code-copy" title="Copy code" aria-label="Copy code">Copy</button>` +
-      `<pre><code data-lang="${esc(lang)}">${inner}</code></pre>${more}</div>`);
+      `<pre><code data-lang="${esc(lang)}">${highlight(body, lang)}</code></pre>${more}</div>`);
     return `\u0000${codeBlocks.length - 1}\u0000`;
   });
   src = esc(src);

@@ -733,6 +733,28 @@ body.subagent-open #subagent-panel { transform: translateX(0); }
 .md pre .dhunk { color: #7cb8ff; }
 .code-diff pre { line-height: 1.5; }
 
+/* a pasted diff collapses to a tiny one-line box (like the compacted-context
+   box) -- click the summary to reveal the colored diff */
+.diff-box {
+  margin: 6px 0 14px; border: 1px solid var(--stroke-soft);
+  background: rgba(14, 18, 32, 0.55); border-radius: 10px; overflow: hidden;
+}
+.diff-box > summary {
+  list-style: none; cursor: pointer; padding: 8px 13px;
+  font-size: 12.5px; font-weight: 600; color: var(--text-dim);
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+.diff-box > summary::-webkit-details-marker { display: none; }
+.diff-box > summary:hover { color: var(--text); }
+.diff-box-icon { font-family: var(--mono); font-weight: 700; color: var(--accent-soft); }
+.diff-box-hint { font-weight: 400; color: var(--text-faint); font-size: 11.5px; }
+.diff-box .code-wrap { margin: 0; }
+.diff-box pre {
+  margin: 0; border: none; border-radius: 0;
+  border-top: 1px solid var(--stroke-soft);
+  max-height: 360px; overflow: auto;
+}
+
 /* long fenced blocks collapse to a preview with a Show-all toggle */
 .code-clamp:not(.expanded) pre { max-height: 300px; overflow: hidden; }
 .code-clamp pre { margin-bottom: 6px; }
