@@ -219,6 +219,23 @@ right because the code compiled. The **first** use installs Playwright and
 downloads Chromium (~150-300MB, one-time); every call after that runs fully
 offline aside from loading the page itself.
 
+### Browser control
+
+For anything on the live web that needs *interaction* — logging in, filling
+forms, searching, clicking through pages, extracting data — the agent has a
+`control_chrome` tool. It hands your goal to a specialized **Browser Agent**
+that drives a real Chrome window step by step: it perceives each page as a
+numbered list of interactive elements (`[2] button "Sign in"`) and acts by
+ref, so a text model can operate the page reliably without pixel-guessing;
+it can also take a screenshot and route it through the vision model when the
+visual layout itself matters. The browser **persists across calls in the
+chat** (cookies, logins, current page survive), so you can delegate follow-up
+goals. The browser is quarantined inside the sub-agent so its step-by-step
+noise never floods the main conversation — the main agent just gets a clean
+report back. Approve it once per goal (in `ask` mode); it uses an isolated
+profile, not your personal Chrome. Runs headed by default so you can watch
+(`browser_headless` in config to hide it).
+
 ### Plan mode
 
 The checklist icon in the composer toggles **plan first**: your next message

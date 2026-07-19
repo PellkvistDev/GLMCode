@@ -432,6 +432,7 @@ const ICONS = {
   generate_image: '<path d="M12 3l1.8 4.2L18 9l-4.2 1.8L12 15l-1.8-4.2L6 9l4.2-1.8z"/><path d="M19 15l.7 1.7L21.5 17.5l-1.8.8-.7 1.7-.7-1.7-1.8-.8 1.8-.8z"/>',
   show_image: '<rect x="3" y="3" width="18" height="18" rx="2"/><circle cx="8.5" cy="8.5" r="1.5"/><path d="M21 15l-5-5L5 21"/>',
   compact_context: '<path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 21h5v-5"/>',
+  control_chrome: '<circle cx="12" cy="12" r="9"/><line x1="3" y1="12" x2="21" y2="12"/><path d="M12 3a15 15 0 0 1 4 9 15 15 0 0 1-4 9 15 15 0 0 1-4-9 15 15 0 0 1 4-9z"/>',
   speak: '<path d="M11 5 6 9H2v6h4l5 4V5z"/><path d="M15.5 8.5a5 5 0 0 1 0 7"/>',
 };
 function toolIcon(name) {
@@ -462,6 +463,8 @@ function toolSummary(name, args) {
       return (args.path || "") + (args.caption ? ` — ${args.caption}` : "");
     case "compact_context":
       return args.reason || "";
+    case "control_chrome":
+      return args.goal || "";
     case "speak":
       return args.text || "";
     default: return "";

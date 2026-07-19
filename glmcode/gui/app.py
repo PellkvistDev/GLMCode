@@ -1235,6 +1235,8 @@ class Api:
         live = self._chats.get(sid)
         if live and live.agent.busy:
             return {"error": "that chat is still working — stop it first"}
+        if live:
+            live.agent.close_browser()  # don't leak a control_chrome window
         self._chats.pop(sid, None)
         self._store.delete(sid)
         Transcript(sid).delete()  # its transcript goes with it

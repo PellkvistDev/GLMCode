@@ -2048,10 +2048,101 @@ TOOL_SCHEMAS = [
         },
         ["text"],
     ),
+    _schema(
+        "control_chrome",
+        "Drive a real web browser to accomplish a goal: navigate sites, click, fill and "
+        "submit forms, log in, search, read pages, and extract information. This launches "
+        "(or reuses) a dedicated Chrome window and hands your goal to a specialized "
+        "browser agent that operates it step by step, then reports back what it did and "
+        "found. The browser PERSISTS between calls in this chat -- cookies, logins and the "
+        "current page survive -- so you can delegate follow-up goals later (e.g. first "
+        "'log into the dashboard', then 'download this month's invoice'). Use this for "
+        "anything on the live web that needs interaction, not just a screenshot (for a "
+        "quick look at your own local dev server, preview_page is lighter). Give a "
+        "COMPLETE, self-contained goal with any specifics (URLs, search terms, what "
+        "counts as done) -- the browser agent does not see this conversation.",
+        {
+            "goal": {"type": "string",
+                     "description": "The complete task to accomplish in the browser, with "
+                                    "all needed specifics and what a successful result "
+                                    "looks like."},
+            "start_url": {"type": "string",
+                          "description": "Optional URL to open first (otherwise the browser "
+                                         "agent navigates on its own from the goal)."},
+        },
+        ["goal"],
+    ),
+]
+
+# ------------------------------------------------------------------------- #
+# Browser sub-agent tools: NOT exposed to the main agent. They're the only
+# tools the specialized browser agent (spawned by control_chrome) gets, and
+# each one funnels to the chat's shared BrowserSession. Every action returns a
+# fresh numbered accessibility snapshot the agent acts on.
+BROWSER_AGENT_SCHEMAS = [
+    _schema(
+        "browser_navigate",
+        "Open a URL in the browser. Returns a numbered list of the page's interactive "
+        "elements plus its title and URL.",
+        {"url": {"type": "string", "description": "URL to open (https:// added if omitted)"}},
+        ["url"],
+    ),
+    _schema(
+        "browser_snapshot",
+        "Re-read the current page: returns the fresh numbered list of interactive "
+        "elements. Element refs change after every action, so snapshot again before "
+        "clicking/typing if you're unsure the refs are current.",
+        {},
+        [],
+    ),
+    _schema(
+        "browser_click",
+        "Click the interactive element with the given ref number (from the latest "
+        "snapshot). Returns the resulting page snapshot.",
+        {"ref": {"type": "integer", "description": "The [n] ref of the element to click"}},
+        ["ref"],
+    ),
+    _schema(
+        "browser_type",
+        "Type text into the input/textarea with the given ref. Set submit=true to press "
+        "Enter afterward (e.g. to run a search). Returns the resulting snapshot.",
+        {
+            "ref": {"type": "integer", "description": "The [n] ref of the input to fill"},
+            "text": {"type": "string", "description": "The text to type"},
+            "submit": {"type": "boolean",
+                       "description": "Press Enter after typing (default false)"},
+        },
+        ["ref", "text"],
+    ),
+    _schema(
+        "browser_key",
+        "Press a single keyboard key on the page (e.g. 'Enter', 'Escape', 'PageDown', "
+        "'Tab'). Returns the resulting snapshot.",
+        {"key": {"type": "string", "description": "Key name, e.g. 'Enter' or 'Escape'"}},
+        ["key"],
+    ),
+    _schema(
+        "browser_read",
+        "Read the visible text content of the current page (truncated if very long). Use "
+        "this to actually extract information; the snapshot only lists clickable elements.",
+        {},
+        [],
+    ),
+    _schema(
+        "browser_screenshot",
+        "Screenshot the current page and get back a vision-model description of how it "
+        "looks -- use when the visual layout itself matters (is something broken, where is "
+        "an element) and the text snapshot isn't enough.",
+        {"question": {"type": "string",
+                      "description": "Optional focus for the description (e.g. 'is the "
+                                     "login form visible?')"}},
+        [],
+    ),
 ]
 
 # Handled specially by the agent (needs the client/events), not via TOOL_FUNCTIONS.
 SUBAGENT_TOOL = "spawn_agents"
+CONTROL_CHROME_TOOL = "control_chrome"
 VIEW_IMAGE_TOOL = "view_image"
 GENERATE_IMAGE_TOOL = "generate_image"
 SHOW_IMAGE_TOOL = "show_image"
@@ -2131,6 +2222,18 @@ TTS_TOOLS = {"speak"}
 # (new file, first-call install/download of Playwright + Chromium), plus it
 # also loads a URL like fetch_url does.
 BROWSER_TOOLS = {"preview_page"}
+# control_chrome launches an interactive browser that can log in, submit forms
+# and act on the live web -- a bigger deal than a screenshot, so it prompts
+# once (in ask mode) to approve the whole session + goal. Same tier as a
+# command: the user vets the goal, then the browser sub-agent runs freely.
+CONTROL_CHROME_TOOLS = {"control_chrome"}
+# The browser sub-agent's own action tools. They exist ONLY inside a
+# control_chrome sub-agent that the user already approved, and sub-agents
+# auto-deny any prompt -- so these must run without asking (the gate was the
+# control_chrome approval). Each just manipulates that one dedicated browser.
+BROWSER_ACTION_TOOLS = {"browser_navigate", "browser_snapshot", "browser_click",
+                        "browser_type", "browser_key", "browser_read",
+                        "browser_screenshot"}
 
 
 def execute_tool(name: str, args: dict) -> str:

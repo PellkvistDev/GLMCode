@@ -17,15 +17,17 @@ from .api import ApiError, Cancelled, RateLimiter, Usage, ZaiClient, estimate_to
 from .config import Config
 from .events import AgentEvents
 from .permissions import PermissionEngine
-from .prompts import (COMPACT_PROMPT, CONTINUE_NUDGE, STEER_NUDGE_TEMPLATE,
-                      STEP_LIMIT_NUDGE, SUBAGENT_PREAMBLE, VERIFY_NUDGE,
-                      VIEW_IMAGE_PROMPT, VISION_ANALYSIS_PROMPT, WRAP_UP_NUDGE,
-                      build_system_prompt)
-from .tools import (COMPACT_CONTEXT_TOOL, GENERATE_IMAGE_TOOL, PREVIEW_PAGE_TOOL,
-                    REMEMBER_TOOL, REVIEW_CHANGES_TOOL, SHOW_HTTP_CAT_TOOL,
-                    SHOW_IMAGE_TOOL, SPEAK_TOOL, SUBAGENT_TOOL, TOOL_SCHEMAS,
-                    VIEW_IMAGE_TOOL, ToolError, clean_todo_items, execute_tool,
-                    set_call_token, set_workdir)
+from .prompts import (BROWSER_AGENT_SYSTEM, COMPACT_PROMPT, CONTINUE_NUDGE,
+                      STEER_NUDGE_TEMPLATE, STEP_LIMIT_NUDGE, SUBAGENT_PREAMBLE,
+                      VERIFY_NUDGE, VIEW_IMAGE_PROMPT, VISION_ANALYSIS_PROMPT,
+                      WRAP_UP_NUDGE, build_system_prompt)
+from .tools import (BROWSER_ACTION_TOOLS, BROWSER_AGENT_SCHEMAS,
+                    COMPACT_CONTEXT_TOOL, CONTROL_CHROME_TOOL,
+                    GENERATE_IMAGE_TOOL, PREVIEW_PAGE_TOOL, REMEMBER_TOOL,
+                    REVIEW_CHANGES_TOOL, SHOW_HTTP_CAT_TOOL, SHOW_IMAGE_TOOL,
+                    SPEAK_TOOL, SUBAGENT_TOOL, TOOL_SCHEMAS, VIEW_IMAGE_TOOL,
+                    ToolError, clean_todo_items, execute_tool, set_call_token,
+                    set_workdir)
 
 # Tools whose output tells the model whether its changes actually work --
 # used by the verify-nudge (see _run_turn): a turn that edits files but never
@@ -154,8 +156,11 @@ class Agent:
         self.busy = False
         # Sub-agents don't get the spawning tool themselves (no recursion).
         self.allow_subagents = allow_subagents
+        # Sub-agents don't get the spawning tool OR control_chrome (a browser
+        # agent is spawned only by the coordinator, and no sub-agent recurses).
         self.tool_schemas = TOOL_SCHEMAS if allow_subagents else [
-            s for s in TOOL_SCHEMAS if s["function"]["name"] != SUBAGENT_TOOL
+            s for s in TOOL_SCHEMAS
+            if s["function"]["name"] not in (SUBAGENT_TOOL, CONTROL_CHROME_TOOL)
         ]
         self._emit_lock = threading.Lock()  # serialize sub-agent progress emits
         # Steering: a message the user sends while this agent is mid-turn.
@@ -205,6 +210,11 @@ class Agent:
         # Per-agent todo list (todo_write is handled in-dispatch): parallel
         # chats each keep their own checklist instead of sharing one global.
         self.todos: list[dict] = []
+        # Interactive browser (control_chrome). Created lazily on first use and
+        # kept alive at the chat level so cookies/login/current page persist
+        # across control_chrome calls; a spawned Browser Agent shares this same
+        # session to run its browser_* action tools. None until first used.
+        self.browser_session = None
         self.rebuild_system_prompt()
 
     # ------------------------------------------------------------------ #
@@ -945,6 +955,11 @@ class Agent:
                     if not self.allow_subagents:
                         raise ToolError("sub-agents cannot spawn further sub-agents")
                     output = self._run_subagents(args.get("agents", []))
+                elif name == CONTROL_CHROME_TOOL:
+                    output = self._control_chrome_tool(
+                        args.get("goal", ""), args.get("start_url", ""))
+                elif name in BROWSER_ACTION_TOOLS:
+                    output = self._browser_action(name, args)
                 elif name == VIEW_IMAGE_TOOL:
                     output = self._view_image(args.get("path", ""), args.get("question", ""))
                 elif name == GENERATE_IMAGE_TOOL:
@@ -1132,6 +1147,114 @@ class Agent:
         # real reason.
         raise ToolError(sink.last_error
                         or "sub-agent ended without producing any output")
+
+    # ------------------------------------------------------------------ #
+    # Interactive browser (control_chrome)
+
+    def _ensure_browser_session(self):
+        """The chat's persistent BrowserSession, created on first use. Kept on
+        the coordinator so cookies/login/page survive across control_chrome
+        calls; sub-agents share this exact instance."""
+        from .browser_session import BrowserSession
+        sess = self.browser_session
+        if sess is None or not sess.is_open:
+            headless = bool(getattr(self.cfg, "browser_headless", False))
+            sess = BrowserSession(headless=headless, status=self.events.info)
+            sess.start()  # raises here (surfaced to the model) if launch fails
+            self.browser_session = sess
+        return sess
+
+    def close_browser(self) -> None:
+        """Tear down the chat's browser, if any. Called when the chat closes."""
+        sess = self.browser_session
+        self.browser_session = None
+        if sess is not None:
+            try:
+                sess.close()
+            except Exception:
+                pass
+
+    def _control_chrome_tool(self, goal: str, start_url: str = "") -> str:
+        """Spawn a specialized Browser Agent that drives the chat's persistent
+        browser toward `goal`, then return its report. The browser itself
+        outlives the sub-agent (see _ensure_browser_session)."""
+        goal = (goal or "").strip()
+        if not goal:
+            raise ToolError("control_chrome needs a 'goal'.")
+        if not self.allow_subagents:
+            raise ToolError("a sub-agent cannot itself launch a browser agent")
+        try:
+            session = self._ensure_browser_session()
+        except Exception as e:
+            raise ToolError(
+                f"Could not start the browser: {e}. Playwright + Chromium install "
+                "on first use and need network access once.")
+        aid = f"chrome-{uuid.uuid4().hex[:6]}"
+        self._emit_subagent(aid, "browser", "running", mission=goal[:280])
+        prompt = goal
+        if start_url.strip():
+            prompt = f"{goal}\n\n(Start by navigating to: {start_url.strip()})"
+        try:
+            report = self._run_browser_subagent(prompt, session, aid)
+            self._emit_subagent(aid, "browser", "done", summary=_first_line(report))
+            return report
+        except Exception as e:
+            err = f"{type(e).__name__}: {e}"
+            self._emit_subagent(aid, "browser", "error", summary=err[:280])
+            raise ToolError(f"Browser agent failed: {e}")
+
+    def _run_browser_subagent(self, goal: str, session, aid: str) -> str:
+        """A sub-agent whose ONLY tools are the browser_* actions and whose
+        system prompt is the Browser Agent prompt. Shares the given
+        BrowserSession so it drives the chat's live browser."""
+        client = ZaiClient(self.client.api_key, self.client.base_url)
+        sink = _CaptureEvents(forward=self._emit_subagent_stream, aid=aid)
+        sub = Agent(self.cfg, client, events=sink, allow_subagents=False,
+                    workdir=self.workdir)
+        sub.model_override = self.model_override
+        sub.browser_session = session
+        # Restrict the sub-agent to ONLY the browser action tools, and give it
+        # the specialized browser system prompt in place of the coding one.
+        sub.tool_schemas = list(BROWSER_AGENT_SCHEMAS)
+        sub._base_system_prompt = BROWSER_AGENT_SYSTEM.format(goal=goal)
+        with self._active_subagents_lock:
+            self._active_subagents[aid] = sub
+        try:
+            sub.run_turn({"role": "user", "content": "Begin. Work toward the goal, "
+                          "one action at a time, and report when done or blocked."})
+        finally:
+            with self._active_subagents_lock:
+                self._active_subagents.pop(aid, None)
+        report = _final_report_text(sub.messages) or sink.text.strip()
+        if not report:
+            raise ToolError(sink.last_error
+                            or "browser agent ended without producing a report")
+        return report
+
+    def _browser_action(self, name: str, args: dict) -> str:
+        """Dispatch a browser_* tool (only ever called inside a Browser Agent,
+        which has self.browser_session set)."""
+        session = self.browser_session
+        if session is None or not session.is_open:
+            raise ToolError("The browser is not open.")
+        if name == "browser_navigate":
+            return session.navigate(args.get("url", ""))
+        if name == "browser_snapshot":
+            return session.snapshot()
+        if name == "browser_click":
+            return session.click(args.get("ref"))
+        if name == "browser_type":
+            return session.type_text(args.get("ref"), args.get("text", ""),
+                                     bool(args.get("submit", False)))
+        if name == "browser_key":
+            return session.press(args.get("key", ""))
+        if name == "browser_read":
+            return session.read_text()
+        if name == "browser_screenshot":
+            out = self.workdir / "generated" / f"browser-{uuid.uuid4().hex[:8]}.png"
+            path = session.screenshot(out)
+            return self._view_image(path, args.get("question", ""))
+        raise ToolError(f"unknown browser action {name}")
 
     # ------------------------------------------------------------------ #
     # Context management

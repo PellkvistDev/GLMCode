@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 from pathlib import Path
 
 from .tools import (READONLY_TOOLS, FILE_WRITE_TOOLS, NETWORK_TOOLS, GIT_TOOLS,
-                    IMAGE_GEN_TOOLS, TTS_TOOLS, BROWSER_TOOLS, TOOL_FUNCTIONS)
+                    IMAGE_GEN_TOOLS, TTS_TOOLS, BROWSER_TOOLS,
+                    CONTROL_CHROME_TOOLS, BROWSER_ACTION_TOOLS, TOOL_FUNCTIONS)
 
 # Module-level command alias registry
 _COMMAND_ALIASES: dict = {}
@@ -169,6 +170,13 @@ class PermissionEngine:
         if name in READONLY_TOOLS:
             return Decision(True)
 
+        # Browser action tools only ever run inside a control_chrome sub-agent
+        # the user already approved; the sub-agent auto-denies prompts, so gating
+        # them here would just break every browser step. The real gate is the
+        # control_chrome approval below.
+        if name in BROWSER_ACTION_TOOLS:
+            return Decision(True)
+
         # A provably read-only shell command (git status, ls, cat, grep, ...)
         # counts as reading. It runs unprompted in plan mode -- exploring the
         # repo is the whole point of planning -- and in every normal mode
@@ -225,6 +233,16 @@ class PermissionEngine:
             if self.mode == "autoedit":
                 return Decision(True)
             return self._ask_generic(name, str(args)[:500], asker)
+
+        if name in CONTROL_CHROME_TOOLS:
+            if self.mode in ("autoedit", "yolo"):
+                return Decision(True)
+            detail = f"Goal: {args.get('goal', '?')}"
+            if args.get("start_url"):
+                detail += f"\nStart at: {args['start_url']}"
+            detail += ("\n\nThis lets the agent drive a real browser (navigate, click, "
+                       "fill forms, log in) toward the goal above.")
+            return self._ask_generic(name, detail, asker)
 
         if name in IMAGE_GEN_TOOLS:
             if self.mode == "autoedit":
