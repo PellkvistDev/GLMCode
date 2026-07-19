@@ -1417,6 +1417,30 @@ class Api:
                         "thumb": _thumb_uri(path) if is_image else ""})
         return out
 
+    def paste_image(self, data_url: str):
+        """A screenshot pasted into the composer (Win+Shift+S -> Ctrl+V)
+        arrives as a base64 data URL from the JS paste handler. Save it to a
+        real file under ~/.makenomistakes/pasted/ so it flows through the
+        exact same attachment -> uploads/ pipeline as picked/dropped files."""
+        try:
+            head, _, b64 = str(data_url or "").partition(",")
+            if not b64 or not head.startswith("data:image/"):
+                return {"error": "Clipboard did not contain an image."}
+            ext = {"data:image/png": ".png", "data:image/jpeg": ".jpg",
+                   "data:image/gif": ".gif", "data:image/webp": ".webp",
+                   "data:image/bmp": ".bmp"}.get(head.split(";")[0], ".png")
+            raw = base64.b64decode(b64)
+            if len(raw) > 30_000_000:
+                return {"error": "Pasted image is too large (>30MB)."}
+            folder = CONFIG_DIR / "pasted"
+            folder.mkdir(parents=True, exist_ok=True)
+            name = time.strftime("pasted-%Y%m%d-%H%M%S") + f"-{uuid.uuid4().hex[:6]}{ext}"
+            path = folder / name
+            path.write_bytes(raw)
+            return {"path": str(path), "name": name, "thumb": _thumb_uri(path)}
+        except Exception as e:
+            return {"error": f"Couldn't save pasted image: {e}"}
+
     def _on_drop(self, event):
         """Native file drop handler (bound in main() to
         window.dom.document.events.drop). pywebview resolves each dropped

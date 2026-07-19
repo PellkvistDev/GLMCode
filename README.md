@@ -103,6 +103,9 @@ break until you regenerate them) — or if `requirements.txt` changed.
   instead of breaking anything.
 - **Drag & drop attachments** — drop files or images anywhere on the window to
   attach them to your next message; same pipeline as the paperclip.
+- **Paste screenshots** — `Win+Shift+S`, then `Ctrl+V` in the chat: the
+  clipboard image is attached instantly (saved under `~/.makenomistakes/pasted/`),
+  no need to save it to a file first. Text pastes are untouched.
 - **Prompt history** — press ↑ in the (empty) composer to recall your previous
   messages, terminal-style, per chat. ↓ walks back toward what you were typing.
 - **@-mention files** — type `@` in the composer to fuzzy-search your project's

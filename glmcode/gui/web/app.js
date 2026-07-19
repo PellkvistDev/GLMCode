@@ -2155,6 +2155,33 @@ window.addEventListener("drop", (e) => {
   dropOverlay(false);
 });
 
+/* ---- paste a screenshot ----------------------------------------------- --
+   Win+Shift+S puts a screenshot on the clipboard; Ctrl+V here attaches it.
+   The image arrives as a Blob (no disk path), so it's handed to Python as a
+   data URL, saved to a real file, and comes back in the same {path, name,
+   thumb} shape every other attachment uses. Text pastes are untouched. */
+document.addEventListener("paste", (e) => {
+  const items = [...((e.clipboardData && e.clipboardData.items) || [])];
+  const imgs = items.filter((it) => it.kind === "file" && it.type.startsWith("image/"));
+  if (!imgs.length) return; // plain text paste -- let the browser handle it
+  e.preventDefault();
+  for (const it of imgs) {
+    const file = it.getAsFile();
+    if (!file) continue;
+    const reader = new FileReader();
+    reader.onload = async () => {
+      let att;
+      try { att = await api().paste_image(reader.result); }
+      catch (err) { toast("Couldn't attach pasted image: " + err, "error", 4000); return; }
+      if (!att || att.error) { toast((att && att.error) || "Couldn't attach pasted image.", "error", 4000); return; }
+      attachments.push(att);
+      renderAttachments();
+      input.focus();
+    };
+    reader.readAsDataURL(file);
+  }
+});
+
 // Called from Python's drop handler (app.py Api._on_drop) with the attachment
 // objects it resolved from the dropped files' real paths.
 window.__onDropResult = function (atts) {
