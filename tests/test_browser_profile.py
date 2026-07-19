@@ -34,6 +34,25 @@ def test_clear_is_fine_when_nothing_saved(monkeypatch, tmp_path):
     assert api.clear_browser_profile() == {"ok": True}
 
 
+def test_set_browser_model_validates_and_persists(monkeypatch, tmp_path):
+    from glmcode.config import Config
+    api = _api(monkeypatch, tmp_path)
+    api._cfg = Config()
+    api._cfg.providers = [{"name": "ollama", "base_url": "http://x",
+                           "api_key": "", "models": ["big-model"]}]
+    monkeypatch.setattr(gui_app, "save_config", lambda cfg: None)
+
+    res = api.set_browser_model("ollama", "big-model")
+    assert res.get("ok") and api._cfg.browser_provider == "ollama"
+    assert api._cfg.browser_model == "big-model"
+
+    assert "error" in api.set_browser_model("nope", "m")   # unknown provider
+
+    res = api.set_browser_model("", "")                    # back to same-as-chat
+    assert res.get("ok") and api._cfg.browser_provider == ""
+    assert api._cfg.browser_model == ""
+
+
 def test_clear_refuses_while_a_browser_is_open(monkeypatch, tmp_path):
     open_sess = SimpleNamespace(is_open=True)
     chats = {"s1": SimpleNamespace(agent=SimpleNamespace(browser_session=open_sess))}

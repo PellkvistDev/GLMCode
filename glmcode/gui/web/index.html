@@ -305,6 +305,11 @@
           dedicated profile (never your personal browser) — pause it, sign in to the sites you
           want it to use once, and it stays signed in. Off = a fresh throwaway profile every time.</span></div>
         <button id="opt-browser-logins" class="switch" role="switch" aria-checked="false"><span></span></button></div>
+      <div class="row"><div class="row-text"><label for="opt-browser-model">Browser model</label>
+        <span class="row-sub">Driving web pages is the hardest job for the small free model. Route
+          just the browser agent to a stronger configured model (e.g. a bigger local Ollama
+          model) for much more reliable browsing.</span></div>
+        <select id="opt-browser-model" class="voice-select"><option value="">Same as chat</option></select></div>
       <div class="row"><div class="row-text"><label>Saved browser data</label>
         <span class="row-sub">Wipe the remembered profile — logs the agent browser out of everything.</span></div>
         <button id="browser-clear-data" class="btn btn-danger-ghost">Clear</button></div>

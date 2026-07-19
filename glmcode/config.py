@@ -135,6 +135,8 @@ class Config:
     reduce_effects: bool = False     # desktop app: drop blur/animations for weak GPUs
     browser_headless: bool = False   # control_chrome: hide the browser window (default: watch it)
     browser_keep_logins: bool = False  # control_chrome: persistent agent profile (logins survive restarts)
+    browser_provider: str = ""       # control_chrome: dedicated Browser Agent provider ("" = same as chat)
+    browser_model: str = ""          # control_chrome: dedicated Browser Agent model ("" = same as chat)
     tts_voice: str = "af_heart"      # Kokoro voice name
     tts_speed: float = 1.0           # Kokoro speech speed, 0.5-2.0
     # Custom model providers: [{"name", "base_url", "api_key", "models": [..]}].

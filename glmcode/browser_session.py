@@ -257,6 +257,9 @@ class BrowserSession:
     def go_back(self) -> str:
         return self._call("go_back")
 
+    def wait(self, seconds: float = 2.0) -> str:
+        return self._call("wait", seconds=seconds)
+
     def current_url(self) -> str:
         return self._call("current_url")
 
@@ -474,6 +477,17 @@ class BrowserSession:
 
     def _op_current_url(self) -> str:
         return self._url()
+
+    def _op_wait(self, seconds: float) -> str:
+        try:
+            seconds = max(0.2, min(float(seconds or 2.0), 10.0))
+        except (TypeError, ValueError):
+            seconds = 2.0
+        try:
+            self._page.wait_for_timeout(seconds * 1000)
+        except Exception:
+            pass
+        return self._op_snapshot()
 
     def _op_screenshot_b64(self, max_width: int) -> str:
         try:

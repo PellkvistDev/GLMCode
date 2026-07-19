@@ -1289,15 +1289,39 @@ class Agent:
             self._emit_subagent(aid, "browser", "error", summary=err[:280])
             raise ToolError(f"Browser agent failed: {e}")
 
+    def _browser_client_and_model(self):
+        """Client + model_override for the Browser Agent. When Settings names
+        a dedicated browser model (typically something stronger than the free
+        flash model -- driving a page is the hardest thing a small model does
+        here), resolve its provider and use that; otherwise inherit the
+        chat's own client/model."""
+        name = (getattr(self.cfg, "browser_provider", "") or "").strip()
+        model = (getattr(self.cfg, "browser_model", "") or "").strip()
+        if name and model:
+            from .config import find_provider
+            prov = find_provider(self.cfg, name)
+            if prov is not None:
+                if prov.get("builtin"):
+                    key = self.cfg.resolve_api_key()
+                    if key:
+                        return ZaiClient(key, self.cfg.base_url), None
+                else:
+                    return (ZaiClient(prov.get("api_key", ""), prov["base_url"]),
+                            model)
+            self.events.warn(f"browser model '{model}' ({name}) not found -- "
+                             "using the chat's model instead")
+        return (ZaiClient(self.client.api_key, self.client.base_url),
+                self.model_override)
+
     def _run_browser_subagent(self, goal: str, session, aid: str) -> str:
         """A sub-agent whose ONLY tools are the browser_* actions and whose
         system prompt is the Browser Agent prompt. Shares the given
         BrowserSession so it drives the chat's live browser."""
-        client = ZaiClient(self.client.api_key, self.client.base_url)
+        client, model_override = self._browser_client_and_model()
         sink = _CaptureEvents(forward=self._emit_subagent_stream, aid=aid)
         sub = Agent(self.cfg, client, events=sink, allow_subagents=False,
                     workdir=self.workdir)
-        sub.model_override = self.model_override
+        sub.model_override = model_override
         sub.browser_session = session
         sub.pausable = True  # the human can pause it and take over the browser
         # Restrict the sub-agent to ONLY the browser action tools, and give it
@@ -1344,6 +1368,8 @@ class Agent:
                 return session.press(args.get("key", ""))
             if name == "browser_read":
                 return session.read_text()
+            if name == "browser_wait":
+                return session.wait(args.get("seconds", 2.0))
             if name == "browser_screenshot":
                 out = self.workdir / "generated" / f"browser-{uuid.uuid4().hex[:8]}.png"
                 path = session.screenshot(out)

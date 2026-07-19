@@ -2138,6 +2138,15 @@ BROWSER_AGENT_SCHEMAS = [
                                      "login form visible?')"}},
         [],
     ),
+    _schema(
+        "browser_wait",
+        "Wait for the page to finish loading/rendering (slow pages, spinners, content "
+        "that appears after a delay), then get a fresh snapshot. Use when the snapshot "
+        "looks incomplete or a spinner/skeleton is showing.",
+        {"seconds": {"type": "number",
+                     "description": "How long to wait, 0.2-10 (default 2)"}},
+        [],
+    ),
 ]
 
 # Handled specially by the agent (needs the client/events), not via TOOL_FUNCTIONS.
@@ -2233,7 +2242,7 @@ CONTROL_CHROME_TOOLS = {"control_chrome"}
 # control_chrome approval). Each just manipulates that one dedicated browser.
 BROWSER_ACTION_TOOLS = {"browser_navigate", "browser_snapshot", "browser_click",
                         "browser_type", "browser_key", "browser_read",
-                        "browser_screenshot"}
+                        "browser_screenshot", "browser_wait"}
 
 
 def execute_tool(name: str, args: dict) -> str:

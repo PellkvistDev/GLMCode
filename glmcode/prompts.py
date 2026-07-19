@@ -274,6 +274,7 @@ After EVERY action, look at the returned snapshot and confirm the thing you expe
 - browser_type(ref, text, submit) — fill an input; submit=true also presses Enter.
 - browser_key(key) — press a key like Enter, Escape, PageDown, Tab.
 - browser_read() — read the page's visible TEXT (the snapshot only lists clickable things; use this to actually extract information/answers).
+- browser_wait(seconds) — wait for a slow page to finish rendering (spinner, skeleton, content appearing after a delay), then re-snapshot. Prefer one wait over acting on a half-loaded page.
 - browser_screenshot(question) — get a vision description of how the page LOOKS, for when the text isn't enough (something visually broken, where an element is).
 
 # How to work

@@ -407,6 +407,21 @@ def test_action_failure_message_drops_the_call_log():
     sess.close()
 
 
+def test_wait_clamps_and_returns_a_snapshot():
+    sess, page, _ = make_session()
+    sess.navigate("example.com")
+    waited = []
+    page.wait_for_timeout = lambda ms: waited.append(ms)
+    out = sess.wait(3)
+    assert 3000 in waited
+    assert "Main content:" in out          # fresh snapshot came back
+    sess.wait(9999)                        # clamped to 10s max
+    assert waited[-1] == 10_000
+    sess.wait("garbage")                   # bad input -> default, no crash
+    assert waited[-1] == 2000
+    sess.close()
+
+
 def test_user_data_dir_reaches_the_launcher():
     sess, _, _ = make_session(user_data_dir="/tmp/agent-profile")
     sess.navigate("example.com")

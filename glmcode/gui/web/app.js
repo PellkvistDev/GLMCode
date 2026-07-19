@@ -2892,8 +2892,43 @@ $("settings-btn").addEventListener("click", async () => {
   populateVoiceSelect();
   populateBackups();
   populateModelPicker();
+  populateBrowserModelSelect();
   populateMcp();
   populateCommands();
+});
+
+/* Dedicated Browser Agent model: every configured provider's models, plus
+   "Same as chat". Options carry [provider, model] as JSON in their value. */
+async function populateBrowserModelSelect() {
+  const sel = $("opt-browser-model");
+  let res;
+  try { res = await api().providers(); } catch (e) { return; }
+  const cur = JSON.stringify([settings.browser_provider || "", settings.browser_model || ""]);
+  sel.innerHTML = "";
+  const same = document.createElement("option");
+  same.value = JSON.stringify(["", ""]);
+  same.textContent = "Same as chat";
+  sel.appendChild(same);
+  for (const p of (res.providers || [])) {
+    for (const m of (p.models || [])) {
+      const o = document.createElement("option");
+      o.value = JSON.stringify([p.name, m]);
+      o.textContent = `${m} — ${p.name}`;
+      sel.appendChild(o);
+    }
+  }
+  sel.value = [...sel.options].some((o) => o.value === cur) ? cur : JSON.stringify(["", ""]);
+}
+
+$("opt-browser-model").addEventListener("change", async (e) => {
+  let prov = "", model = "";
+  try { [prov, model] = JSON.parse(e.target.value); } catch (err) { /* same as chat */ }
+  const res = await api().set_browser_model(prov, model);
+  if (res && res.error) { toast(res.error, "error", 4000); return; }
+  settings.browser_provider = res.browser_provider;
+  settings.browser_model = res.browser_model;
+  toast(model ? `Browser agent will use ${model}.` : "Browser agent uses the chat's model.",
+        "info", 3000);
 });
 $("settings-close").addEventListener("click", () => { $("settings-backdrop").hidden = true; });
 $("settings-backdrop").addEventListener("click", (e) => {

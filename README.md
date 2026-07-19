@@ -255,6 +255,13 @@ default so you can watch the real window too; flip **Settings → Hide the
 browser window** (`browser_headless`) to run it invisibly and just watch the
 panel.
 
+**Route the browser to a stronger model.** Driving web pages is the hardest
+job the small free model does. **Settings → Browser model** routes *just* the
+Browser Agent to any configured model (e.g. a bigger local Ollama model)
+while the rest of the chat stays on the free default — the single biggest
+browsing-reliability lever. There's also a `browser_wait` action so the agent
+waits out spinners/slow pages instead of acting on a half-loaded snapshot.
+
 The snapshot engine is built for reliability with a small model: element
 refs are **stamped into the DOM and stay stable** while you're on a page (no
 more acting on a remembered number that silently moved), actions **re-locate

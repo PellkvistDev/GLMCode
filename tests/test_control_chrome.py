@@ -217,6 +217,47 @@ def test_keep_logins_routes_profile_dir_to_session(scripted_agent, monkeypatch):
     assert made["user_data_dir"] is None   # off = throwaway profile
 
 
+def test_browser_model_override_resolves_provider(scripted_agent):
+    """Settings can route JUST the Browser Agent to a stronger configured
+    model; the sub-agent then talks to that provider instead of the chat's."""
+    agent = scripted_agent(allow_subagents=True)
+    agent.cfg.providers = [{"name": "ollama", "base_url": "http://localhost:11434/v1",
+                            "api_key": "k", "models": ["qwen3:32b"]}]
+    agent.cfg.browser_provider = "ollama"
+    agent.cfg.browser_model = "qwen3:32b"
+    client, override = agent._browser_client_and_model()
+    assert client.base_url == "http://localhost:11434/v1"
+    assert override == "qwen3:32b"
+
+    # Unknown provider -> warn + fall back to the chat's own client/model.
+    agent.cfg.browser_provider = "gone"
+    client, override = agent._browser_client_and_model()
+    assert client.base_url == agent.client.base_url
+    assert override == agent.model_override
+    assert any("not found" in m for (_lvl, m) in agent.events.notices)
+
+    # No setting -> chat's client/model, no warning.
+    agent.events.notices.clear()
+    agent.cfg.browser_provider = ""
+    agent.cfg.browser_model = ""
+    client, override = agent._browser_client_and_model()
+    assert client.base_url == agent.client.base_url
+    assert agent.events.notices == []
+
+
+def test_browser_wait_routes_to_session(scripted_agent):
+    agent = scripted_agent(allow_subagents=True)
+    waited = []
+
+    class Sess:
+        is_open = True
+        def wait(self, seconds): waited.append(seconds); return "snap"
+
+    agent.browser_session = Sess()
+    out = agent._browser_action("browser_wait", {"seconds": 4})
+    assert out == "snap" and waited == [4]
+
+
 def test_subagents_do_not_get_control_chrome(scripted_agent):
     # A normal (non-coordinator) sub-agent's schema must exclude control_chrome.
     sub = scripted_agent(allow_subagents=False)

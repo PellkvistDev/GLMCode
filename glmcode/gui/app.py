@@ -748,6 +748,7 @@ class Api:
             "notifications": c.notifications, "reduce_effects": c.reduce_effects,
             "browser_headless": c.browser_headless,
             "browser_keep_logins": c.browser_keep_logins,
+            "browser_provider": c.browser_provider, "browser_model": c.browser_model,
         }
 
     def set_setting(self, key: str, value):
@@ -1636,6 +1637,21 @@ class Api:
         if not self._agent.wrapup_subagent(aid):
             return {"error": "that sub-agent is no longer running"}
         return {"ok": True}
+
+    def set_browser_model(self, provider_name: str, model: str):
+        """Pick the dedicated Browser Agent model ('' + '' = same as chat).
+        Driving a page is the hardest thing the small free model does, so
+        routing just control_chrome to a stronger configured model is the
+        single biggest browsing-reliability lever."""
+        provider_name = (provider_name or "").strip()
+        model = (model or "").strip()
+        if provider_name and not find_provider(self._cfg, provider_name):
+            return {"error": f'unknown provider "{provider_name}"'}
+        self._cfg.browser_provider = provider_name
+        self._cfg.browser_model = model if provider_name else ""
+        save_config(self._cfg)
+        return {"ok": True, "browser_provider": self._cfg.browser_provider,
+                "browser_model": self._cfg.browser_model}
 
     def clear_browser_profile(self):
         """Delete the saved agent-browser profile (cookies, logins). The
