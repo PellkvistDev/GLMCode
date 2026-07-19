@@ -589,6 +589,32 @@ body.subagent-open #subagent-panel { transform: translateX(0); }
   flex-wrap: wrap; padding: 10px 14px; font-size: 12px; color: #ffe98a;
   background: linear-gradient(transparent, rgba(20, 16, 0, 0.9));
 }
+#browser-view-expand svg { width: 13px; height: 13px; display: block; }
+body.browser-full #browser-view-expand { color: var(--accent-soft); border-color: var(--accent-soft); }
+
+/* Fullscreen browser mode: the panel spans the whole window; the live view
+   gets the stage and the sub-agent chat/actions become a side column. */
+body.browser-full #subagent-panel {
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 30%);
+  grid-template-rows: auto minmax(0, 1fr) auto auto;
+}
+body.browser-full .subagent-panel-head { grid-column: 1 / -1; grid-row: 1; }
+body.browser-full #browser-view {
+  grid-column: 1; grid-row: 2 / 5;
+  display: flex; flex-direction: column; min-height: 0;
+  border-right: 1px solid var(--stroke-soft); border-bottom: none;
+}
+body.browser-full #browser-view[hidden] { display: none; }
+body.browser-full .browser-view-frame { flex: 1; min-height: 0; }
+body.browser-full #browser-view-img {
+  width: 100%; height: 100%; max-height: none;
+  object-fit: contain; object-position: top center;
+}
+body.browser-full #subagent-panel-body { grid-column: 2; grid-row: 2; min-height: 0; }
+body.browser-full #subagent-steer-queued { grid-column: 2; grid-row: 3; }
+body.browser-full #subagent-panel-composer { grid-column: 2; grid-row: 4; }
 
 /* queued-steering-message bubble: shown above whichever composer it belongs
    to (main #composer-wrap or the sub-agent mini-composer) while a message

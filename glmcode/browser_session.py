@@ -225,7 +225,10 @@ class BrowserSession:
             label = self._describe(h, tag)
             i += 1
             self._refs[i] = h
-            lines.append(f"[{i}] {tag} {label}".rstrip())
+            # Disabled (greyed-out) elements are listed but flagged, so the
+            # model knows they exist without wasting an action on them.
+            flag = "" if self._enabled(h) else " (disabled)"
+            lines.append((f"[{i}] {tag} {label}".rstrip()) + flag)
             if i >= self.max_elements:
                 break
         header = f"Page title: {self._title()}\nURL: {self._url()}\n"
@@ -235,31 +238,73 @@ class BrowserSession:
         return (header + f"Interactive elements ({len(lines)}):\n"
                 + "\n".join(lines)
                 + "\n\nClick with browser_click(ref), fill inputs with "
-                  "browser_type(ref, text).")
+                  "browser_type(ref, text). Elements marked (disabled) can't "
+                  "be used until something enables them.")
 
     def _op_click(self, ref: int) -> str:
         h = self._ref(ref)
+        self._require_usable(h, ref, "click")
         try:
             h.scroll_into_view_if_needed(timeout=5000)
         except Exception:
             pass
         try:
-            h.click(timeout=10_000)
+            h.click(timeout=8_000)
         except Exception as e:
-            raise BrowserError(f"Could not click [{ref}]: {e}")
+            raise BrowserError(self._action_failure("click", ref, e))
         self._settle()
         return self._op_snapshot()
 
     def _op_type_text(self, ref: int, text: str, submit: bool) -> str:
         h = self._ref(ref)
+        self._require_usable(h, ref, "type into")
         try:
-            h.fill(str(text), timeout=10_000)
+            h.fill(str(text), timeout=8_000)
             if submit:
                 h.press("Enter")
         except Exception as e:
-            raise BrowserError(f"Could not type into [{ref}]: {e}")
+            raise BrowserError(self._action_failure("type into", ref, e))
         self._settle()
         return self._op_snapshot()
+
+    # -- action pre-flight (driver thread) --------------------------------- #
+
+    def _enabled(self, h) -> bool:
+        try:
+            return bool(h.is_enabled())
+        except Exception:
+            return True  # unknown -> let the action itself decide
+
+    def _require_usable(self, h, ref, verb: str) -> None:
+        """Fail INSTANTLY with an actionable message instead of letting
+        Playwright spin its multi-second retry loop against an element that is
+        disabled or already gone from the page."""
+        try:
+            attached = h.evaluate("e => e.isConnected")
+        except Exception:
+            attached = False
+        if not attached:
+            raise BrowserError(
+                f"Element [{ref}] is no longer on the page -- it changed since "
+                "your snapshot. Call browser_snapshot and use the fresh refs.")
+        try:
+            if not h.is_enabled():
+                raise BrowserError(
+                    f"Element [{ref}] is disabled (greyed out) right now, so "
+                    f"you can't {verb} it. Something else likely has to happen "
+                    "first (fill a required field, pick an option, wait for the "
+                    "page). Look at the snapshot and do that step instead.")
+        except BrowserError:
+            raise
+        except Exception:
+            pass  # enabled-check itself failed -> let the action try
+
+    @staticmethod
+    def _action_failure(verb: str, ref, e) -> str:
+        msg = str(e).split("\n")[0]  # first line; the Call log is pure noise
+        return (f"Could not {verb} [{ref}]: {msg} -- the element may be "
+                "covered by an overlay/dialog, or the page changed. Call "
+                "browser_snapshot to re-orient (maybe close any popup first).")
 
     def _op_press(self, key: str) -> str:
         try:

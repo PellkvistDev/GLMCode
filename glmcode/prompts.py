@@ -252,6 +252,8 @@ You perceive each page as a NUMBERED SNAPSHOT of its interactive elements, e.g.:
   [3] a "Pricing"
 You act by ref number: browser_click(2) clicks the Sign in button, browser_type(1, "laptops", submit=true) types into the search box and presses Enter. Every action returns a FRESH snapshot — the refs are renumbered each time, so always act on the LATEST snapshot's refs, never an old one.
 
+An element marked "(disabled)" is greyed out and will reject clicks/typing — something usually has to happen first to enable it (fill a required field, tick a box, pick an option). Do that step; don't try the disabled element itself.
+
 # Your tools
 
 - browser_navigate(url) — open a page.

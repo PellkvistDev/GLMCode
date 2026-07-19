@@ -1393,7 +1393,12 @@ function noteBrowserAgent(ev) {
 function refreshBrowserView() {
   const view = $("browser-view");
   const st = activeSubagentId && browserAgents[activeSubagentId];
-  if (!st) { view.hidden = true; return; }
+  if (!st) {
+    view.hidden = true;
+    // Fullscreen without a browser view would leave an empty half-screen.
+    document.body.classList.remove("browser-full");
+    return;
+  }
   view.hidden = false;
   if (st.image) $("browser-view-img").src = st.image;
   $("browser-view-url").textContent = st.url || "…";
@@ -1419,6 +1424,15 @@ async function toggleBrowserPause() {
 
 $("browser-view-toggle").addEventListener("click", toggleBrowserPause);
 $("browser-view-resume").addEventListener("click", toggleBrowserPause);
+
+// Fullscreen browser mode: the live view takes the whole panel width and the
+// sub-agent chat/actions shrink to a side column (see body.browser-full CSS).
+$("browser-view-expand").addEventListener("click", () => {
+  const on = document.body.classList.toggle("browser-full");
+  $("browser-view-expand").title = on
+    ? "Exit fullscreen (Esc)"
+    : "Fullscreen — big browser view, chat at the side";
+});
 
 function getSubagentThread(aid) {
   let t = subagentThreads[aid];
@@ -1662,10 +1676,12 @@ function openSubagentPanel(aid, name, status) {
 
 function closeSubagentPanel() {
   document.body.classList.remove("subagent-open");
+  document.body.classList.remove("browser-full");
 }
 
 function clearSubagentPanel() {
   document.body.classList.remove("subagent-open");
+  document.body.classList.remove("browser-full");
   $("subagent-tabs").innerHTML = "";
   $("subagent-panel-body").innerHTML = "";
   for (const key of Object.keys(subagentThreads)) delete subagentThreads[key];
@@ -1678,7 +1694,13 @@ function clearSubagentPanel() {
 
 $("subagent-panel-close").addEventListener("click", closeSubagentPanel);
 document.addEventListener("keydown", (e) => {
-  if (e.key === "Escape" && document.body.classList.contains("subagent-open")) closeSubagentPanel();
+  if (e.key !== "Escape" || !document.body.classList.contains("subagent-open")) return;
+  // Two-stage Escape: leave fullscreen first, close the panel second.
+  if (document.body.classList.contains("browser-full")) {
+    document.body.classList.remove("browser-full");
+    return;
+  }
+  closeSubagentPanel();
 });
 
 async function sendSubagentSteer() {

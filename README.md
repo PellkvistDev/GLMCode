@@ -248,9 +248,17 @@ again (refused while a browser is open, so nothing is yanked mid-run).
 
 A **live Browser panel** slides in when the agent starts browsing: it mirrors
 the page as it works (a screenshot after each action), shows the current URL,
-and carries the Pause/Resume control. Runs headed by default so you can watch
-the real window too; flip **Settings → Hide the browser window**
-(`browser_headless`) to run it invisibly and just watch the panel.
+and carries the Pause/Resume control. The ⛶ button switches to **fullscreen
+browser mode** — the live view takes the whole window with the agent's
+chat/actions in a slim side column (Esc steps back out). Runs headed by
+default so you can watch the real window too; flip **Settings → Hide the
+browser window** (`browser_headless`) to run it invisibly and just watch the
+panel.
+
+Snapshots flag greyed-out controls as `(disabled)`, and trying to click/type
+one fails *instantly* with advice (find the step that enables it) instead of
+hanging in a 10-second retry loop — same for elements that vanished since the
+last snapshot, which get a "re-snapshot" pointer rather than a raw timeout.
 
 **Pause and take over.** While the Browser Agent is working, hit **Pause** on
 its row: it freezes at the next safe checkpoint and the browser window is

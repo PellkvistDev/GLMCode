@@ -11,11 +11,14 @@ from glmcode.browser_session import BrowserError, BrowserSession
 
 
 class FakeHandle:
-    def __init__(self, tag, attrs=None, text="", visible=True):
+    def __init__(self, tag, attrs=None, text="", visible=True, enabled=True,
+                 attached=True):
         self._tag = tag
         self._attrs = attrs or {}
         self._text = text
         self._visible = visible
+        self._enabled = enabled
+        self._attached = attached
         self.clicked = 0
         self.filled = None
         self.pressed = []
@@ -23,7 +26,12 @@ class FakeHandle:
     def is_visible(self):
         return self._visible
 
-    def evaluate(self, _js):
+    def is_enabled(self):
+        return self._enabled
+
+    def evaluate(self, js):
+        if "isConnected" in js:
+            return self._attached
         return self._tag.upper()
 
     def get_attribute(self, name):
@@ -216,6 +224,64 @@ def test_launch_failure_surfaces_on_start():
     sess = BrowserSession(launch_factory=boom)
     with pytest.raises(RuntimeError, match="no chromium"):
         sess.navigate("example.com")
+
+
+def test_disabled_elements_are_flagged_in_the_snapshot():
+    sess, page, _ = make_session()
+    sess.navigate("example.com")
+    page.handles.append(FakeHandle("button", text="Submit", enabled=False))
+    snap = sess.snapshot()
+    assert '[4] button "Submit" (disabled)' in snap
+    assert "(disabled) can't be used" in snap       # the footer explains it
+    assert '[3] button "Go" (disabled)' not in snap  # enabled ones unflagged
+    sess.close()
+
+
+def test_typing_into_disabled_element_fails_instantly_with_advice():
+    """The exact failure from the field: fill() against a disabled input used
+    to spin Playwright's 10s retry loop, then surface a useless Call-log
+    dump. Now it fails immediately and tells the model what to do instead."""
+    import time
+    sess, page, _ = make_session()
+    sess.navigate("example.com")
+    page.handles[0]._enabled = False   # the input is greyed out
+    snap = sess.snapshot()             # refs now know about it
+    assert "(disabled)" in snap
+    t0 = time.monotonic()
+    with pytest.raises(BrowserError) as ei:
+        sess.type_text(1, "x=0")
+    took = time.monotonic() - t0
+    assert took < 1.0                        # instant, not a 10s timeout
+    msg = str(ei.value)
+    assert "disabled" in msg and "[1]" in msg
+    assert "Call log" not in msg             # no Playwright noise
+    assert page.handles[0].filled is None    # fill was never attempted
+    sess.close()
+
+
+def test_clicking_detached_element_says_resnapshot():
+    sess, page, _ = make_session()
+    sess.navigate("example.com")
+    page.handles[1]._attached = False  # the page replaced this node
+    with pytest.raises(BrowserError, match="browser_snapshot"):
+        sess.click(2)
+    assert page.handles[1].clicked == 0
+    sess.close()
+
+
+def test_action_failure_message_drops_the_call_log():
+    sess, page, _ = make_session()
+    sess.navigate("example.com")
+    def boom(text, timeout=0):
+        raise RuntimeError("Timeout 8000ms exceeded.\nCall log:\n  - attempting fill action\n  - retrying")
+    page.handles[0].fill = boom
+    with pytest.raises(BrowserError) as ei:
+        sess.type_text(1, "hello")
+    msg = str(ei.value)
+    assert "Timeout 8000ms exceeded." in msg
+    assert "Call log" not in msg and "retrying" not in msg
+    assert "browser_snapshot" in msg   # actionable next step
+    sess.close()
 
 
 def test_user_data_dir_reaches_the_launcher():
