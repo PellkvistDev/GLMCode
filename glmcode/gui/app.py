@@ -462,6 +462,11 @@ class WebEvents(AgentEvents):
             src = ""
         self.emit("show_audio", path=str(path), caption=caption or "", src=src)
 
+    # background workers (conversational mode) --------------------------------
+    def worker_update(self, id, name, status, summary="", result=""):
+        self.emit("worker_update", id=id, name=name, status=status,
+                  summary=summary, result=result)
+
     # permissions ------------------------------------------------------------
     def ask_permission(self, title, preview, always_label=None):
         rid = uuid.uuid4().hex
@@ -547,6 +552,15 @@ class ChatState:
         # file state of the k-th user turn -- what "edit & resend" reverts to.
         # Cleared on compaction (older turns' messages no longer exist).
         self.turn_snapshots: list[dict] = []
+        # Speech-to-speech voice mode: a separate, persistent conversational
+        # agent (pure delegator -- see Agent(conversational=True)) that shares
+        # this chat's project/backup/mcp so its background workers act on the
+        # real code. It streams through its OWN events (sid "<sid>::voice") so
+        # the voice overlay is cleanly separate from the coding transcript.
+        # All lazily created on first use.
+        self.convo_agent: Agent | None = None
+        self.convo_events: WebEvents | None = None
+        self.convo_lock = threading.Lock()  # one voice turn at a time
 
 
 class Api:
@@ -1708,6 +1722,101 @@ class Api:
                         title=cs.title, sessions=self.list_sessions())
             self._os_attention(cs.sid, "Done -- waiting for you."
                                if ok else "Stopped on an error -- waiting for you.")
+
+    # -- speech-to-speech voice mode --------------------------------------- #
+
+    def _voice_sid(self, sid: str) -> str:
+        return f"{sid}::voice"
+
+    def _ensure_convo(self, cs: "ChatState") -> "Agent":
+        """The chat's conversational (delegator) agent, built on first use. It
+        shares the coding chat's project, backups, MCP and model so the workers
+        it dispatches operate on the real code -- but keeps its own short spoken
+        conversation and its own event stream (the voice overlay)."""
+        if cs.convo_agent is not None:
+            return cs.convo_agent
+        coding = cs.agent
+        vsid = self._voice_sid(cs.sid)
+        ev = WebEvents(vsid, self._perm_registry)
+        ev._cfg = self._cfg
+        ev._window = self._window
+        ev.notifier = lambda body, _sid=cs.sid: self._os_attention(_sid, body)
+        convo = Agent(self._cfg, coding.client, events=ev,
+                      workdir=coding.workdir, conversational=True)
+        # Share the things a dispatched worker needs to act on the real project.
+        convo.backup_repo = coding.backup_repo
+        convo.mcp = coding.mcp
+        convo.model_override = coding.model_override
+        convo.vision_client = coding.vision_client
+        cs.convo_agent = convo
+        cs.convo_events = ev
+        return convo
+
+    def voice_mode(self, on: bool):
+        """Turn speech-to-speech mode on/off for the active chat. Turning it on
+        just readies the conversational agent; the audio loop lives in the UI."""
+        cs = self._active
+        if cs is None:
+            return {"error": "no active chat — start a New Chat first"}
+        if on:
+            self._ensure_convo(cs)
+            return {"ok": True, "voice_sid": self._voice_sid(cs.sid)}
+        return {"ok": True}
+
+    def send_voice(self, text: str):
+        """One spoken user turn to the conversational agent. Runs on its own
+        thread and streams through the voice events; replies are always read
+        aloud (it's a voice conversation). Returns busy if it's mid-reply."""
+        cs = self._active
+        if cs is None:
+            return {"error": "no active chat"}
+        text = (text or "").strip()
+        if not text:
+            return {"error": "empty"}
+        if not cs.convo_lock.acquire(blocking=False):
+            return {"error": "busy"}
+        self._ensure_convo(cs)
+        threading.Thread(target=self._run_convo_turn,
+                         args=(cs, {"role": "user", "content": text}),
+                         daemon=True).start()
+        return {"ok": True, "started": True}
+
+    def announce_worker(self, name: str, status: str, result: str):
+        """Have the conversational agent tell the user out loud that a background
+        worker finished. Called by the UI when a worker_update lands. Runs a
+        short convo turn from a system-style note; skipped if it's mid-reply so
+        the UI should re-try (it queues these)."""
+        cs = self._active
+        if cs is None or cs.convo_agent is None:
+            return {"error": "no voice session"}
+        if not cs.convo_lock.acquire(blocking=False):
+            return {"error": "busy"}
+        outcome = "finished successfully" if status == "done" else "failed"
+        result = str(result or "")[:2000]
+        note = (f"[System note — not from the user] The background worker "
+                f"'{name}' just {outcome}. Its result:\n{result}\n\n"
+                f"Briefly tell the user out loud what happened, in plain "
+                f"spoken language. Do not read code or paths aloud.")
+        threading.Thread(target=self._run_convo_turn,
+                         args=(cs, {"role": "user", "content": note}),
+                         daemon=True).start()
+        return {"ok": True, "started": True}
+
+    def _run_convo_turn(self, cs: "ChatState", msg: dict) -> None:
+        """Body of one voice turn, on its own thread. Mirrors _run_send_turn but
+        for the delegator agent: no @-mentions, no backups, no titling -- just
+        talk. The convo_lock (acquired by the caller) is released here."""
+        convo, ev = cs.convo_agent, cs.convo_events
+        ok = False
+        try:
+            ev.start_turn(True)  # voice replies are always spoken
+            convo.run_turn(msg)
+            ok = True
+        except Exception as e:
+            ev.error(f"{type(e).__name__}: {e}")
+        finally:
+            cs.convo_lock.release()
+            ev.emit("voice_turn_complete", ok=ok)
 
     def execute_plan(self):
         """The 'Execute plan' button: a normal (non-plan) turn with a canned

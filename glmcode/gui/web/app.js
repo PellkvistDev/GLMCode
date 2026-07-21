@@ -912,6 +912,12 @@ const unreadSessions = new Set();
 const pendingPerms = {};   // sid -> the permission event waiting for that chat
 
 function handle(ev) {
+  // Speech-to-speech voice events (the delegator agent) are tagged with a
+  // "<sid>::voice" sid and drive the voice overlay, not the coding transcript.
+  if (ev.sid && ev.sid.endsWith("::voice")) {
+    handleVoiceEvent(ev);
+    return;
+  }
   if (ev.sid && ev.sid !== activeSessionId) {
     handleBackgroundEvent(ev);
     return;
@@ -1184,8 +1190,17 @@ function enqueueTtsPlayback(src) {
   if (!ttsPlaying) playNextTts();
 }
 
+// Voice mode hooks this to know when the spoken reply has fully finished
+// playing (so it can resume listening). null in normal read-aloud.
+let onTtsIdle = null;
+
 function playNextTts() {
-  if (ttsAudioQueue.length === 0) { ttsPlaying = false; ttsCurrentAudio = null; return; }
+  if (ttsAudioQueue.length === 0) {
+    ttsPlaying = false;
+    ttsCurrentAudio = null;
+    if (onTtsIdle) { try { onTtsIdle(); } catch (e) { /* ignore */ } }
+    return;
+  }
   ttsPlaying = true;
   const src = ttsAudioQueue.shift();
   const audio = new Audio(src);
@@ -3637,6 +3652,338 @@ async function boot() {
   reportFocus(document.hasFocus());
   try { api().log && api().log("boot:done"); } catch (e) { /* ignore */ }
 }
+
+/* ============================================================ voice mode ==
+   Speech-to-speech: talk to a delegator agent hands-free. It hands real work
+   to background workers (which act on the project) and keeps listening, so you
+   can queue work by voice without touching the keyboard. When a worker finishes
+   it tells you out loud.
+
+   The hard parts of a live audio loop -- endpointing (when did you stop
+   talking), barge-in (cutting in while it speaks), and echo (not hearing its
+   own voice as your input) -- are handled with a simple energy VAD and generous
+   timing; tune the constants below for your mic/room. Push-to-talk (hold Space,
+   or the on-screen button) sidesteps all three when hands-free misbehaves. */
+
+const voice = {
+  active: false, ptt: false, stream: null, ctx: null, analyser: null,
+  data: null, timer: 0, rec: null, chunks: [], recording: false, discard: false,
+  speaking: false, transcribing: false, voiceFrames: 0, silenceMs: 0,
+  speechMs: 0, announceQ: [], workers: {},
+};
+// Energy VAD tuning (RMS 0..1 of the mic signal). Higher = needs louder input.
+const V_START = 0.020;        // onset: above this counts as speech
+const V_STOP = 0.012;         // offset: below this counts as silence (hysteresis)
+const V_BARGE = 0.050;        // must clear this to cut in over our own TTS (echo guard)
+const V_ONSET_MS = 120;       // sustained sound before we start recording
+const V_SILENCE_MS = 850;     // trailing silence that ends an utterance
+const V_MIN_SPEECH_MS = 350;  // ignore blips shorter than this
+const V_FRAME_MS = 50;        // VAD poll cadence
+
+function setVoiceStatus(text) { const el = $("voice-status"); if (el) el.textContent = text; }
+function setVoiceOrb(state) {
+  const orb = $("voice-orb");
+  if (orb) orb.className = "voice-orb voice-orb-" + state;
+}
+
+async function startVoice() {
+  if (voice.active) return;
+  let res;
+  try { res = await api().voice_mode(true); } catch (e) { res = { error: String(e) }; }
+  if (!res || res.error) { toast(res && res.error ? res.error : "Couldn't start voice mode.", "error", 5000); return; }
+  voice.sid = res.voice_sid || "";
+  try {
+    voice.stream = await navigator.mediaDevices.getUserMedia({
+      audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+    });
+  } catch (e) {
+    toast("Microphone access is needed for voice mode.", "error", 6000);
+    try { await api().voice_mode(false); } catch (_) { /* ignore */ }
+    return;
+  }
+  voice.active = true;
+  voice.announceQ = [];
+  voice.workers = {};
+  renderVoiceWorkers();
+  $("voice-caption").textContent = "";
+  $("voice-overlay").hidden = false;
+  $("voice-chip").setAttribute("aria-pressed", "true");
+  $("voice-chip").classList.add("active");
+  // Web Audio analyser for the energy VAD.
+  const Ctx = window.AudioContext || window.webkitAudioContext;
+  voice.ctx = new Ctx();
+  const src = voice.ctx.createMediaStreamSource(voice.stream);
+  voice.analyser = voice.ctx.createAnalyser();
+  voice.analyser.fftSize = 1024;
+  voice.data = new Uint8Array(voice.analyser.fftSize);
+  src.connect(voice.analyser);
+  onTtsIdle = onVoiceTtsIdle;
+  if (voice.ptt) {
+    setVoiceStatus("Push-to-talk — hold Space or the button");
+    setVoiceOrb("idle");
+  } else {
+    setVoiceStatus("Listening… just start talking");
+    setVoiceOrb("listening");
+  }
+  voice.timer = setInterval(vadTick, V_FRAME_MS);
+}
+
+function stopVoice() {
+  if (!voice.active && !voice.stream) return;
+  voice.active = false;
+  onTtsIdle = null;
+  bargeInTts();
+  if (voice.timer) { clearInterval(voice.timer); voice.timer = 0; }
+  try { if (voice.rec && voice.recording) voice.rec.stop(); } catch (e) { /* ignore */ }
+  voice.recording = false;
+  if (voice.stream) { voice.stream.getTracks().forEach((t) => t.stop()); voice.stream = null; }
+  if (voice.ctx) { try { voice.ctx.close(); } catch (e) { /* ignore */ } voice.ctx = null; }
+  $("voice-overlay").hidden = true;
+  $("voice-chip").setAttribute("aria-pressed", "false");
+  $("voice-chip").classList.remove("active");
+  try { api().voice_mode(false); } catch (e) { /* ignore */ }
+}
+
+function micEnergy() {
+  voice.analyser.getByteTimeDomainData(voice.data);
+  let sum = 0;
+  for (let i = 0; i < voice.data.length; i++) {
+    const v = (voice.data[i] - 128) / 128;
+    sum += v * v;
+  }
+  return Math.sqrt(sum / voice.data.length);
+}
+
+// Hands-free endpointing state machine. Skipped entirely in push-to-talk mode
+// (there, the button/Space drives start/stop directly).
+function vadTick() {
+  if (!voice.active || voice.ptt) return;
+  const e = micEnergy();
+  const orb = $("voice-orb");
+  if (orb) orb.style.setProperty("--amp", Math.min(1, e / 0.1).toFixed(3));
+  if (voice.recording) {
+    voice.speechMs += V_FRAME_MS;
+    if (e > V_STOP) voice.silenceMs = 0;
+    else voice.silenceMs += V_FRAME_MS;
+    if (voice.silenceMs >= V_SILENCE_MS) endUtterance();
+    return;
+  }
+  if (voice.transcribing) return;  // busy sending the last utterance
+  // Not recording: watch for a speech onset. While our own reply is playing,
+  // require a much louder, sustained input (barge-in) so we don't record the
+  // TTS coming out of the speakers.
+  const bar = voice.speaking ? V_BARGE : V_START;
+  if (e > bar) {
+    voice.voiceFrames += 1;
+    if (voice.voiceFrames * V_FRAME_MS >= V_ONSET_MS) {
+      if (voice.speaking) bargeInTts();
+      startUtterance();
+    }
+  } else {
+    voice.voiceFrames = 0;
+  }
+}
+
+function startUtterance() {
+  if (voice.recording || !voice.stream) return;
+  let mime = "";
+  if (window.MediaRecorder) {
+    if (MediaRecorder.isTypeSupported("audio/webm")) mime = "audio/webm";
+    else if (MediaRecorder.isTypeSupported("audio/ogg")) mime = "audio/ogg";
+  }
+  try {
+    voice.rec = mime ? new MediaRecorder(voice.stream, { mimeType: mime })
+                     : new MediaRecorder(voice.stream);
+  } catch (e) { return; }
+  voice.chunks = [];
+  voice.discard = false;
+  voice.recording = true;
+  voice.speechMs = 0;
+  voice.silenceMs = 0;
+  voice.rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) voice.chunks.push(ev.data); };
+  voice.rec.onstop = finishUtterance;
+  voice.rec.start();
+  setVoiceStatus("Listening…");
+  setVoiceOrb("hearing");
+}
+
+function endUtterance() {
+  if (!voice.recording) return;
+  voice.recording = false;
+  // Too short to be real speech (a cough, a door) -- throw it away.
+  if (voice.speechMs < V_MIN_SPEECH_MS) voice.discard = true;
+  try { voice.rec.stop(); } catch (e) { /* onstop still fires */ }
+}
+
+async function finishUtterance() {
+  voice.voiceFrames = 0;
+  if (voice.discard || !voice.chunks.length) {
+    setVoiceOrb(voice.speaking ? "speaking" : "listening");
+    setVoiceStatus(voice.speaking ? "Speaking…" : "Listening…");
+    return;
+  }
+  voice.transcribing = true;
+  setVoiceOrb("thinking");
+  setVoiceStatus("Transcribing…");
+  const blob = new Blob(voice.chunks, { type: voice.chunks[0].type || "audio/webm" });
+  voice.chunks = [];
+  const dataUrl = await new Promise((resolve) => {
+    const r = new FileReader();
+    r.onloadend = () => resolve(r.result);
+    r.onerror = () => resolve("");
+    r.readAsDataURL(blob);
+  });
+  let text = "";
+  try {
+    const res = await api().transcribe_audio(dataUrl);
+    if (res && res.text) text = res.text.trim();
+    else if (res && res.error) toast(res.error, "warn", 4000);
+  } catch (e) { /* ignore */ }
+  voice.transcribing = false;
+  if (!text) {
+    setVoiceOrb(voice.speaking ? "speaking" : "listening");
+    setVoiceStatus(voice.speaking ? "Speaking…" : "Listening…");
+    return;
+  }
+  $("voice-caption").innerHTML = `<div class="voice-you">${esc(text)}</div>`;
+  await sendVoiceTurn(text);
+}
+
+async function sendVoiceTurn(text) {
+  setVoiceOrb("thinking");
+  setVoiceStatus("Thinking…");
+  try {
+    const res = await api().send_voice(text);
+    if (res && res.error === "busy") {
+      // It's still replying to the previous thing; hold this one briefly.
+      setTimeout(() => sendVoiceTurn(text), 400);
+    }
+  } catch (e) { /* ignore */ }
+}
+
+function bargeInTts() {
+  resetTtsPlayback();
+  voice.speaking = false;
+}
+
+function onVoiceTtsIdle() {
+  voice.speaking = false;
+  if (!voice.active) return;
+  setVoiceOrb(voice.ptt ? "idle" : "listening");
+  setVoiceStatus(voice.ptt ? "Your turn — hold to talk" : "Your turn — just talk");
+  processAnnounceQueue();
+}
+
+// A worker finished while we may have been mid-conversation. Announcements run
+// as short convo turns; if the agent is busy, hold and retry when it frees up.
+function processAnnounceQueue() {
+  if (!voice.active || voice.speaking || voice.transcribing || voice.recording) return;
+  if (!voice.announceQ.length) return;
+  const a = voice.announceQ.shift();
+  api().announce_worker(a.name, a.status, a.result).then((res) => {
+    if (res && res.error === "busy") { voice.announceQ.unshift(a); setTimeout(processAnnounceQueue, 600); }
+  }).catch(() => {});
+}
+
+function renderVoiceWorkers() {
+  const el = $("voice-workers");
+  if (!el) return;
+  const ws = Object.values(voice.workers);
+  if (!ws.length) { el.innerHTML = ""; return; }
+  el.innerHTML = ws.map((w) => {
+    const cls = w.status === "running" ? "vw-run" : (w.status === "done" ? "vw-done" : "vw-err");
+    const icon = w.status === "running" ? "●" : (w.status === "done" ? "✓" : "✕");
+    return `<div class="voice-worker ${cls}"><span class="vw-icon">${icon}</span>${esc(w.name)}</div>`;
+  }).join("");
+}
+
+function handleVoiceEvent(ev) {
+  switch (ev.type) {
+    case "stream_start":
+      $("voice-caption").querySelector(".voice-it")?.remove();
+      voice._replyBuf = "";
+      break;
+    case "content": {
+      voice._replyBuf = (voice._replyBuf || "") + (ev.text || "");
+      let it = $("voice-caption").querySelector(".voice-it");
+      if (!it) {
+        it = document.createElement("div");
+        it.className = "voice-it";
+        $("voice-caption").appendChild(it);
+      }
+      it.textContent = voice._replyBuf;
+      break;
+    }
+    case "play_audio":
+      voice.speaking = true;
+      setVoiceOrb("speaking");
+      setVoiceStatus("Speaking…");
+      handlePlayAudio(ev);
+      break;
+    case "tts_reset":
+      resetTtsPlayback();
+      break;
+    case "worker_update":
+      voice.workers[ev.id] = { name: ev.name, status: ev.status };
+      renderVoiceWorkers();
+      if (ev.status === "done" || ev.status === "error") {
+        voice.announceQ.push({ name: ev.name, status: ev.status, result: ev.result || "" });
+        processAnnounceQueue();
+      }
+      break;
+    case "voice_turn_complete":
+      // If nothing was spoken (e.g. it only dispatched a worker silently),
+      // make sure we return to listening.
+      if (!voice.speaking && voice.active) onVoiceTtsIdle();
+      break;
+    case "error":
+      toast("Voice: " + (ev.message || "error"), "warn", 5000);
+      break;
+  }
+}
+
+function setVoicePtt(on) {
+  voice.ptt = on;
+  const t = $("voice-ptt-toggle");
+  t.setAttribute("aria-checked", String(on));
+  t.textContent = on ? "Push-to-talk" : "Hands-free";
+  $("voice-ptt-btn").hidden = !on;
+  if (voice.active) {
+    if (on) { setVoiceStatus("Hold Space or the button to talk"); setVoiceOrb("idle"); }
+    else { setVoiceStatus("Listening… just talk"); setVoiceOrb("listening"); }
+  }
+}
+
+function pttPress() {
+  if (!voice.active || !voice.ptt || voice.recording || voice.transcribing) return;
+  if (voice.speaking) bargeInTts();
+  // In PTT we drive the recorder directly, bypassing the energy gate.
+  voice.speechMs = V_MIN_SPEECH_MS;  // always keep PTT audio
+  startUtterance();
+  $("voice-ptt-btn").classList.add("held");
+}
+function pttRelease() {
+  if (!voice.ptt || !voice.recording) return;
+  $("voice-ptt-btn").classList.remove("held");
+  endUtterance();
+}
+
+$("voice-chip").addEventListener("click", () => { if (voice.active) stopVoice(); else startVoice(); });
+$("voice-close").addEventListener("click", stopVoice);
+$("voice-ptt-toggle").addEventListener("click", () => setVoicePtt(!voice.ptt));
+$("voice-ptt-btn").addEventListener("mousedown", pttPress);
+$("voice-ptt-btn").addEventListener("mouseup", pttRelease);
+$("voice-ptt-btn").addEventListener("mouseleave", pttRelease);
+window.addEventListener("keydown", (e) => {
+  if (e.code === "Space" && voice.active && voice.ptt && !e.repeat &&
+      document.activeElement?.tagName !== "INPUT" &&
+      document.activeElement?.tagName !== "TEXTAREA") {
+    e.preventDefault(); pttPress();
+  }
+});
+window.addEventListener("keyup", (e) => {
+  if (e.code === "Space" && voice.active && voice.ptt) { e.preventDefault(); pttRelease(); }
+});
 
 function bootSafely() {
   boot().catch((e) => {

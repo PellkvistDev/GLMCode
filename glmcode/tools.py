@@ -2164,7 +2164,46 @@ BROWSER_AGENT_SCHEMAS = [
     ),
 ]
 
+# Conversational (speech-to-speech) mode: the agent you talk to by voice is a
+# pure delegator. It does no file work itself -- it dispatches real work to
+# background workers that run autonomously (fire-and-forget, never blocking the
+# conversation) and it can check on them. These schemas replace the normal tool
+# set when the agent runs in conversational mode.
+CONVERSATIONAL_SCHEMAS = [
+    _schema(
+        "dispatch_worker",
+        "Hand a piece of real work off to a background worker that runs on its own, "
+        "immediately, WITHOUT blocking the conversation -- so you can keep talking to the "
+        "user while it works. Use this for ANYTHING that takes real doing: writing or editing "
+        "code, running commands or tests, searching or analyzing the codebase, multi-step "
+        "tasks. The worker has the full tool set and works autonomously; it CANNOT ask "
+        "questions and does NOT see this conversation, so give it a COMPLETE, self-contained "
+        "mission with all the context and specifics it needs. Returns instantly with a worker "
+        "id -- do not wait for it; just tell the user out loud you've started on it and carry "
+        "on. The user will be told out loud when it finishes.",
+        {
+            "name": {"type": "string",
+                     "description": "Short kebab-case label for this worker, e.g. "
+                                    "'add-dark-mode' or 'fix-login-bug'."},
+            "task": {"type": "string",
+                     "description": "The complete, self-contained mission for the worker, "
+                                    "with all context it needs (it can't see this chat)."},
+        },
+        ["task"],
+    ),
+    _schema(
+        "check_workers",
+        "Check on the background workers you've dispatched -- what's still running, what "
+        "finished, and what each one reported. Use this when the user asks how things are "
+        "going, or before you claim something is done. Returns instantly.",
+        {},
+        [],
+    ),
+]
+
 # Handled specially by the agent (needs the client/events), not via TOOL_FUNCTIONS.
+DISPATCH_WORKER_TOOL = "dispatch_worker"
+CHECK_WORKERS_TOOL = "check_workers"
 SUBAGENT_TOOL = "spawn_agents"
 CONTROL_CHROME_TOOL = "control_chrome"
 VIEW_IMAGE_TOOL = "view_image"

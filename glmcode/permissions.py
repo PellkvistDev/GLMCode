@@ -177,6 +177,15 @@ class PermissionEngine:
         if name in BROWSER_ACTION_TOOLS:
             return Decision(True)
 
+        # The conversational (voice) agent's own tools. check_workers is
+        # read-only; dispatch_worker just starts a background worker that runs
+        # UNDER this same permission mode -- so its risky file/command steps are
+        # still gated inside the worker (in "ask" mode a worker is effectively
+        # read-only, like a sub-agent). Prompting the voice agent itself is
+        # pointless (it can't answer a dialog mid-conversation), so allow these.
+        if name in ("dispatch_worker", "check_workers"):
+            return Decision(True)
+
         # A provably read-only shell command (git status, ls, cat, grep, ...)
         # counts as reading. It runs unprompted in plan mode -- exploring the
         # repo is the whole point of planning -- and in every normal mode

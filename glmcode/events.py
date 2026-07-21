@@ -75,6 +75,15 @@ class AgentEvents:
         """A live frame from the Browser Agent's page: `url` and a small JPEG
         data-URL `image`, for a UI to mirror the browser. No-op without a UI."""
 
+    # -- background workers (conversational / speech-to-speech mode) --------- #
+    def worker_update(self, id: str, name: str, status: str,
+                      summary: str = "", result: str = "") -> None:
+        """A fire-and-forget background worker (dispatched by the conversational
+        agent via dispatch_worker) changed state: 'started' | 'done' | 'error'.
+        On 'done'/'error', `result` carries the worker's full final report so a
+        UI can have the conversational agent announce it out loud. No-op unless
+        a UI is attached."""
+
     # -- images ------------------------------------------------------------ #
     def show_image(self, path: str, caption: str = "") -> None:
         """Display an image inline for the user. No-op unless a UI is attached."""

@@ -86,6 +86,7 @@ class RecordingEvents(AgentEvents):
         self.wrapups = 0
         self.subagent_events = []  # (id, status, summary)
         self.streams = []          # (id, kind, data)
+        self.worker_events = []    # (id, name, status, summary, result)
 
     def content_delta(self, text):
         self.content.append(text)
@@ -116,6 +117,9 @@ class RecordingEvents(AgentEvents):
 
     def subagent_stream(self, id, kind, **data):
         self.streams.append((id, kind, data))
+
+    def worker_update(self, id, name, status, summary="", result=""):
+        self.worker_events.append((id, name, status, summary, result))
 
 
 @pytest.fixture

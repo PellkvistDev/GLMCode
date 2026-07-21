@@ -46,6 +46,12 @@
         <line id="ra-mute2" x1="21" y1="8" x2="16" y2="16" hidden/>
       </svg>
     </button>
+    <button id="voice-chip" class="icon-btn" aria-label="Voice conversation" aria-pressed="false" title="Talk to it — hands-free voice conversation">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+        <path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>
+      </svg>
+    </button>
     <button id="mode-chip" class="chip chip-btn" title="Permission mode — click to cycle">ask</button>
     <button id="settings-btn" class="icon-btn" aria-label="Settings" title="Settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
@@ -230,6 +236,30 @@
     </button>
   </div>
 </aside>
+
+<!-- Voice conversation overlay (speech-to-speech) -->
+<div id="voice-overlay" class="voice-overlay" hidden>
+  <div class="voice-panel glass-strong" role="dialog" aria-modal="true" aria-label="Voice conversation">
+    <div class="voice-head">
+      <h2>Voice</h2>
+      <div class="voice-head-actions">
+        <button id="voice-ptt-toggle" class="chip chip-btn" role="switch" aria-checked="false"
+                title="Push-to-talk: hold Space to speak instead of hands-free listening">Hands-free</button>
+        <button id="voice-close" class="icon-btn" aria-label="End voice conversation" title="End voice conversation">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
+        </button>
+      </div>
+    </div>
+    <div id="voice-orb" class="voice-orb" aria-hidden="true"><span class="voice-orb-core"></span></div>
+    <div id="voice-status" class="voice-status">Starting…</div>
+    <div id="voice-caption" class="voice-caption" aria-live="polite"></div>
+    <div id="voice-workers" class="voice-workers" aria-live="polite"></div>
+    <div class="voice-foot">
+      <button id="voice-ptt-btn" class="btn btn-primary voice-ptt-btn" hidden>Hold to talk</button>
+      <span id="voice-hint" class="row-sub">Just start talking. Tell it what to build — it'll delegate and keep listening.</span>
+    </div>
+  </div>
+</div>
 
 <!-- Toasts -->
 <div id="toasts" aria-live="polite"></div>

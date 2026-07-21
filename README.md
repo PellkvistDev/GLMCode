@@ -364,6 +364,30 @@ auto-detect. The **first** use installs `faster-whisper` and downloads the
 chosen model (size shown next to each in Settings, one-time, needs network
 access); everything after that runs fully offline.
 
+### Voice conversation (speech-to-speech)
+
+Talk to it hands-free. The mic icon in the title bar opens a voice
+conversation: you speak, it answers out loud, and — this is the point — it
+doesn't go quiet while it works. The agent you're talking to is a *delegator*.
+When you ask for real work, it hands the job to a **background worker** that
+runs autonomously on your project and *immediately keeps listening*, so you
+can pile on more requests while earlier work runs. When a worker finishes, it
+tells you out loud. Ask "how's it going?" any time and it'll check.
+
+- **Hands-free by default** — a simple voice-activity detector notices when
+  you start and stop talking. If your mic or room makes that unreliable,
+  flip to **push-to-talk** (hold Space, or the on-screen button) in the voice
+  panel — no endpointing, no echo, no false triggers.
+- **Barge-in** — start talking while it's speaking and it stops to listen.
+- Transcription is the local dictation engine above; the spoken replies use
+  the local voice (Kokoro) — both offline, no API cost.
+
+The workers run under your current **permission mode**, exactly like parallel
+sub-agents: in *ask* mode they're effectively read-only (they'll research and
+report but can't change files without a prompt you can't answer by voice), so
+switch to *auto-edit* or *full-auto* before a voice session if you want them to
+actually edit code.
+
 ### Backups
 
 Optional, per-chat, on by default: before each message runs, your project's

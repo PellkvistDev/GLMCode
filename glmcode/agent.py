@@ -18,16 +18,18 @@ from .config import Config
 from .events import AgentEvents
 from .permissions import PermissionEngine
 from .prompts import (BROWSER_AGENT_SYSTEM, BROWSER_RESUME_NOTE, COMPACT_PROMPT,
-                      CONTINUE_NUDGE, STEER_NUDGE_TEMPLATE, STEP_LIMIT_NUDGE,
-                      SUBAGENT_PREAMBLE, VERIFY_NUDGE, VIEW_IMAGE_PROMPT,
-                      VISION_ANALYSIS_PROMPT, WRAP_UP_NUDGE, build_system_prompt)
+                      CONTINUE_NUDGE, CONVERSATIONAL_SYSTEM, STEER_NUDGE_TEMPLATE,
+                      STEP_LIMIT_NUDGE, SUBAGENT_PREAMBLE, VERIFY_NUDGE,
+                      VIEW_IMAGE_PROMPT, VISION_ANALYSIS_PROMPT, WRAP_UP_NUDGE,
+                      build_system_prompt)
 from .tools import (BROWSER_ACTION_TOOLS, BROWSER_AGENT_SCHEMAS,
-                    COMPACT_CONTEXT_TOOL, CONTROL_CHROME_TOOL,
-                    GENERATE_IMAGE_TOOL, PREVIEW_PAGE_TOOL, REMEMBER_TOOL,
-                    REVIEW_CHANGES_TOOL, SHOW_HTTP_CAT_TOOL, SHOW_IMAGE_TOOL,
-                    SPEAK_TOOL, SUBAGENT_TOOL, TOOL_SCHEMAS, VIEW_IMAGE_TOOL,
-                    ToolError, clean_todo_items, execute_tool, set_call_token,
-                    set_workdir)
+                    CHECK_WORKERS_TOOL, COMPACT_CONTEXT_TOOL,
+                    CONTROL_CHROME_TOOL, CONVERSATIONAL_SCHEMAS,
+                    DISPATCH_WORKER_TOOL, GENERATE_IMAGE_TOOL, PREVIEW_PAGE_TOOL,
+                    REMEMBER_TOOL, REVIEW_CHANGES_TOOL, SHOW_HTTP_CAT_TOOL,
+                    SHOW_IMAGE_TOOL, SPEAK_TOOL, SUBAGENT_TOOL, TOOL_SCHEMAS,
+                    VIEW_IMAGE_TOOL, ToolError, clean_todo_items, execute_tool,
+                    set_call_token, set_workdir)
 
 # Tools whose output tells the model whether its changes actually work --
 # used by the verify-nudge (see _run_turn): a turn that edits files but never
@@ -134,7 +136,8 @@ class _CaptureEvents(AgentEvents):
 
 class Agent:
     def __init__(self, cfg: Config, client: ZaiClient, events: AgentEvents | None = None,
-                 allow_subagents: bool = True, workdir: Path | None = None):
+                 allow_subagents: bool = True, workdir: Path | None = None,
+                 conversational: bool = False):
         self.cfg = cfg
         self.client = client
         # The project folder this agent works in. Pinned to its turn thread
@@ -159,12 +162,31 @@ class Agent:
         self.busy = False
         # Sub-agents don't get the spawning tool themselves (no recursion).
         self.allow_subagents = allow_subagents
-        # Sub-agents don't get the spawning tool OR control_chrome (a browser
-        # agent is spawned only by the coordinator, and no sub-agent recurses).
-        self.tool_schemas = TOOL_SCHEMAS if allow_subagents else [
-            s for s in TOOL_SCHEMAS
-            if s["function"]["name"] not in (SUBAGENT_TOOL, CONTROL_CHROME_TOOL)
-        ]
+        # Conversational (speech-to-speech) mode: the agent the user talks to by
+        # voice is a pure delegator -- it does no file work itself, it only
+        # converses and hands real work to fire-and-forget background workers
+        # (dispatch_worker) so it never goes quiet mid-conversation. It gets a
+        # tiny, dedicated tool set and a spoken-style system prompt.
+        self.conversational = conversational
+        if conversational:
+            self.tool_schemas = list(CONVERSATIONAL_SCHEMAS)
+        elif allow_subagents:
+            self.tool_schemas = TOOL_SCHEMAS
+        else:
+            # Sub-agents don't get the spawning tool OR control_chrome (a browser
+            # agent is spawned only by the coordinator, and no sub-agent recurses).
+            self.tool_schemas = [
+                s for s in TOOL_SCHEMAS
+                if s["function"]["name"] not in (SUBAGENT_TOOL, CONTROL_CHROME_TOOL)
+            ]
+        # Fire-and-forget background workers dispatched in conversational mode.
+        # Unlike spawn_agents (which joins), these are NOT waited on -- each runs
+        # on its own daemon thread and reports back through worker_update events;
+        # the registry survives across the conversational agent's short turns
+        # (the Agent is persistent per chat).
+        self._workers: dict[str, dict] = {}
+        self._workers_lock = threading.Lock()
+        self._worker_seq = 0
         self._emit_lock = threading.Lock()  # serialize sub-agent progress emits
         # Steering: a message the user sends while this agent is mid-turn.
         # It doesn't interrupt the current model call -- it's queued (one at
@@ -234,7 +256,10 @@ class Agent:
         # Cached separately from the live message so refreshing the context-
         # usage note (see _refresh_context_note) doesn't need to re-run
         # build_system_prompt's git subprocess calls on every model call.
-        self._base_system_prompt = build_system_prompt(self.workdir, self.cfg.model)
+        if self.conversational:
+            self._base_system_prompt = CONVERSATIONAL_SYSTEM
+        else:
+            self._base_system_prompt = build_system_prompt(self.workdir, self.cfg.model)
         if self.transcript:
             # Tell the model its transcript files exist and where, so it can
             # grep them for anything compacted out of context or said in a
@@ -1030,7 +1055,12 @@ class Agent:
 
             set_call_token(run_token)
             try:
-                if name == SUBAGENT_TOOL:
+                if name == DISPATCH_WORKER_TOOL:
+                    output = self._dispatch_worker(args.get("name", ""),
+                                                   args.get("task", ""))
+                elif name == CHECK_WORKERS_TOOL:
+                    output = self._check_workers()
+                elif name == SUBAGENT_TOOL:
                     if not self.allow_subagents:
                         raise ToolError("sub-agents cannot spawn further sub-agents")
                     output = self._run_subagents(args.get("agents", []))
@@ -1226,6 +1256,87 @@ class Agent:
         # real reason.
         raise ToolError(sink.last_error
                         or "sub-agent ended without producing any output")
+
+    # ------------------------------------------------------------------ #
+    # Fire-and-forget background workers (conversational mode)
+
+    def _dispatch_worker(self, name: str, task: str) -> str:
+        """Start a background worker on its own daemon thread and return
+        IMMEDIATELY (never joins). The worker runs a full autonomous sub-agent;
+        it reports progress through worker_update events, and its result lands
+        in the registry for check_workers to read. This is what keeps the
+        conversational agent responsive: real work happens off to the side."""
+        task = str(task or "").strip()
+        if not task:
+            raise ToolError("dispatch_worker needs a non-empty 'task'")
+        with self._workers_lock:
+            self._worker_seq += 1
+            wid = f"wk{self._worker_seq}"
+            name = str(name or "").strip()[:60] or f"worker-{self._worker_seq}"
+            self._workers[wid] = {
+                "id": wid, "name": name, "task": task, "status": "running",
+                "result": "", "error": None,
+            }
+        # One rate limiter shared by every background worker in this chat, so
+        # several running at once stay spaced out on the free tier's ~1 req/s.
+        if getattr(self, "_worker_limiter", None) is None:
+            self._worker_limiter = RateLimiter()
+        self.events.worker_update(wid, name, "started")
+        self._emit_subagent(wid, name, "running", mission=task[:280])
+        t = threading.Thread(target=self._run_worker, args=(wid, name, task),
+                             daemon=True)
+        t.start()
+        return (f"Started background worker '{name}' (id {wid}). It's running now; "
+                f"tell the user out loud you've started, keep talking, and don't wait "
+                f"for it -- you'll be told when it finishes.")
+
+    def _run_worker(self, wid: str, name: str, task: str) -> None:
+        """Body of a background worker thread: run the mission to completion and
+        record the outcome. Never raises out of the thread."""
+        try:
+            report, usage = self._run_single_subagent(
+                name, task, self._worker_limiter, wid)
+            with self._workers_lock:
+                w = self._workers.get(wid)
+                if w is not None:
+                    w["status"], w["result"] = "done", report
+            # Sub-agent token usage is folded in here, on the worker thread.
+            # Usage.add isn't locked; guard it with the emit lock (also held by
+            # every events emit) so we don't race the main turn's accounting.
+            with self._emit_lock:
+                if usage is not None:
+                    self.session_usage.add(usage)
+            self._emit_subagent(wid, name, "done", summary=_first_line(report))
+            self.events.worker_update(wid, name, "done",
+                                      summary=_first_line(report), result=report)
+        except Exception as e:
+            err = f"{type(e).__name__}: {e}"
+            with self._workers_lock:
+                w = self._workers.get(wid)
+                if w is not None:
+                    w["status"], w["error"] = "error", err
+            self._emit_subagent(wid, name, "error", summary=err[:280])
+            self.events.worker_update(wid, name, "error", summary=err[:280], result=err)
+
+    def _check_workers(self) -> str:
+        """A plain-text roundup of every worker dispatched this chat, for the
+        conversational agent to answer 'how's it going?' from."""
+        with self._workers_lock:
+            workers = list(self._workers.values())
+        if not workers:
+            return "No background workers have been dispatched yet."
+        running = [w for w in workers if w["status"] == "running"]
+        done = [w for w in workers if w["status"] == "done"]
+        errored = [w for w in workers if w["status"] == "error"]
+        lines = [f"{len(running)} running, {len(done)} done, {len(errored)} failed.\n"]
+        for w in workers:
+            if w["status"] == "running":
+                lines.append(f"- {w['name']} ({w['id']}): still working — {w['task'][:120]}")
+            elif w["status"] == "done":
+                lines.append(f"- {w['name']} ({w['id']}): DONE — {_first_line(w['result'])}")
+            else:
+                lines.append(f"- {w['name']} ({w['id']}): FAILED — {w['error']}")
+        return "\n".join(lines)
 
     # ------------------------------------------------------------------ #
     # Interactive browser (control_chrome)
