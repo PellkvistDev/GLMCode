@@ -851,6 +851,7 @@ class Api:
             "voice_silence_ms": c.voice_silence_ms,
             "voice_wake_enabled": c.voice_wake_enabled,
             "voice_wake_word": c.voice_wake_word,
+            "voice_reply_language": c.voice_reply_language,
             "notifications": c.notifications, "reduce_effects": c.reduce_effects,
             "browser_headless": c.browser_headless,
             "browser_keep_logins": c.browser_keep_logins,
@@ -897,6 +898,16 @@ class Api:
             c.voice_wake_enabled = bool(value)
         elif key == "voice_wake_word" and isinstance(value, str) and value.strip():
             c.voice_wake_word = value.strip()[:60]
+        elif key == "voice_reply_language" and value in ("en", "match"):
+            c.voice_reply_language = value
+            # If a voice session is open, refresh its prompt so the change
+            # applies right away rather than only on the next session.
+            cs = self._active
+            if cs is not None and cs.convo_agent is not None:
+                try:
+                    cs.convo_agent.rebuild_system_prompt()
+                except Exception:
+                    pass
         elif key == "tts_speed":
             try:
                 c.tts_speed = min(2.0, max(0.5, float(value)))

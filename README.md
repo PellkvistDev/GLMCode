@@ -403,6 +403,13 @@ tells you out loud. Ask "how's it going?" any time and it'll check.
   push-to-talk key, and a toggle for the sound cues.
 - **It's saved** — the voice conversation is written into the chat's
   searchable transcript, so it isn't lost when you close the overlay.
+- **Speak any language, code stays English** — talk to it in Swedish (or
+  anything else) and it understands you, but it always writes the tasks it hands
+  to workers in English and reasons in English, so speaking another language
+  never costs you code quality. Pick whether spoken replies come back in English
+  or your own language in **Settings → Dictation** (the local voice, Kokoro,
+  sounds best in English). Set the transcription language there too, or leave it
+  on auto-detect.
 - **Wake word** — turn it on in **Settings → Dictation** and set your own
   phrase ("hey assistant" by default); the app then listens (locally — nothing
   leaves the machine) and opens a hands-free session when it hears you. Anything

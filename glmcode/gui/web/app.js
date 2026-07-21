@@ -2675,6 +2675,10 @@ $("voice-sensitivity").addEventListener("change", async () => {
   voice.sens = v;  // take effect immediately if a voice session is open
 });
 
+$("voice-reply-lang").addEventListener("change", async () => {
+  settings = await api().set_setting("voice_reply_language", $("voice-reply-lang").value);
+});
+
 function silenceLabel(ms) { return (ms / 1000).toFixed(2).replace(/0$/, "") + "s"; }
 $("voice-silence").addEventListener("input", () => {
   $("voice-silence-label").textContent = silenceLabel(parseInt($("voice-silence").value, 10));
@@ -3138,6 +3142,7 @@ function syncSettingsUI() {
   $("voice-silence-label").textContent = silenceLabel(sil);
   $("opt-earcons").setAttribute("aria-checked", settings.voice_earcons !== false);
   $("voice-ptt-key-label").textContent = pttKeyName(settings.voice_ptt_key || "Space");
+  $("voice-reply-lang").value = settings.voice_reply_language || "en";
   const wakeOn = !!settings.voice_wake_enabled;
   $("opt-wake").setAttribute("aria-checked", wakeOn);
   $("wake-word-row").hidden = !wakeOn;

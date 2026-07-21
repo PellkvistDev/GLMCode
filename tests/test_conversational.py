@@ -53,9 +53,32 @@ def test_conversational_agent_has_only_delegation_tools(monkeypatch, events):
 
 def test_conversational_uses_spoken_system_prompt(monkeypatch, events):
     convo = _convo(monkeypatch, events)
-    assert convo._base_system_prompt == CONVERSATIONAL_SYSTEM
+    assert convo._base_system_prompt.startswith(CONVERSATIONAL_SYSTEM)
     assert convo.messages[0]["role"] == "system"
     assert CONVERSATIONAL_SYSTEM.split("\n")[0] in convo.messages[0]["content"]
+
+
+def test_language_policy_english_work_by_default(monkeypatch, events):
+    convo = _convo(monkeypatch, events)
+    sysmsg = convo.messages[0]["content"]
+    # Whatever language is spoken, the work (worker tasks) stays English.
+    assert "ALWAYS reason in English" in sysmsg
+    assert "dispatch_worker) in clear English" in sysmsg
+    # Default reply language is English.
+    assert "Reply to the user out loud in English." in sysmsg
+
+
+def test_language_policy_reply_match_mode(monkeypatch, events):
+    import glmcode.agent as agent_mod
+    monkeypatch.setattr(agent_mod, "ZaiClient", ScriptedClient)
+    ScriptedClient.scripts = []
+    cfg = Config()
+    cfg.voice_reply_language = "match"
+    convo = Agent(cfg, ScriptedClient(), events=events, conversational=True)
+    sysmsg = convo.messages[0]["content"]
+    assert "in the same language they spoke" in sysmsg
+    # ...but worker tasks are STILL English even in match-reply mode.
+    assert "dispatch_worker) in clear English" in sysmsg
 
 
 def test_dispatch_worker_returns_immediately_and_finishes(monkeypatch, events):

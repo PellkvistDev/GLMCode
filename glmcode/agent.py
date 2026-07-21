@@ -284,7 +284,7 @@ class Agent:
         # usage note (see _refresh_context_note) doesn't need to re-run
         # build_system_prompt's git subprocess calls on every model call.
         if self.conversational:
-            self._base_system_prompt = CONVERSATIONAL_SYSTEM
+            self._base_system_prompt = CONVERSATIONAL_SYSTEM + self._conversational_language_note()
         else:
             self._base_system_prompt = build_system_prompt(self.workdir, self.cfg.model)
         if self.transcript:
@@ -297,6 +297,27 @@ class Agent:
             self.messages[0] = sys_msg
         else:
             self.messages.insert(0, sys_msg)
+
+    def _conversational_language_note(self) -> str:
+        """Multilingual policy for voice mode: understand any spoken language,
+        but keep the actual coding work in English (so speaking, say, Swedish
+        doesn't degrade code quality), and reply in the user's chosen language."""
+        reply = getattr(self.cfg, "voice_reply_language", "en")
+        reply_line = ("Reply to the user out loud in the same language they spoke to you."
+                      if reply == "match"
+                      else "Reply to the user out loud in English.")
+        return (
+            "\n\n# Language\n"
+            "The user may speak to you in any language — their speech is transcribed "
+            "for you, so you might receive Swedish, English, or anything else. Whatever "
+            "language they use:\n"
+            "- ALWAYS reason in English, and ALWAYS write the tasks you hand to workers "
+            "(dispatch_worker) in clear English. This keeps coding quality high and is "
+            "required — never hand a worker a task written in another language. Do "
+            "preserve any exact strings, identifiers, or literal text the user dictated "
+            "(e.g. Swedish UI copy) verbatim inside the task.\n"
+            f"- {reply_line}"
+        )
 
     def _with_usage_note(self, base: str) -> str:
         est = estimate_tokens(self.messages) if self.messages else 0
