@@ -2675,6 +2675,40 @@ $("voice-sensitivity").addEventListener("change", async () => {
   voice.sens = v;  // take effect immediately if a voice session is open
 });
 
+function silenceLabel(ms) { return (ms / 1000).toFixed(2).replace(/0$/, "") + "s"; }
+$("voice-silence").addEventListener("input", () => {
+  $("voice-silence-label").textContent = silenceLabel(parseInt($("voice-silence").value, 10));
+});
+$("voice-silence").addEventListener("change", async () => {
+  const v = parseInt($("voice-silence").value, 10);
+  settings = await api().set_setting("voice_silence_ms", v);
+  voice.endpointMs = v;
+});
+$("opt-earcons").addEventListener("click", async () => {
+  const next = $("opt-earcons").getAttribute("aria-checked") !== "true";
+  settings = await api().set_setting("voice_earcons", next);
+  $("opt-earcons").setAttribute("aria-checked", String(next));
+});
+// Push-to-talk key capture: click, then press any key to bind it.
+let pttKeyCapturing = false;
+$("voice-ptt-key").addEventListener("click", () => {
+  pttKeyCapturing = true;
+  $("voice-ptt-key").textContent = "Press a key…";
+});
+window.addEventListener("keydown", async (e) => {
+  if (!pttKeyCapturing) return;
+  e.preventDefault();
+  pttKeyCapturing = false;
+  const code = e.code || "Space";
+  settings = await api().set_setting("voice_ptt_key", code);
+  voice.pttKey = code;
+  $("voice-ptt-key").textContent = "Click, then press a key";
+  $("voice-ptt-key-label").textContent = pttKeyName(code);
+}, true);
+function pttKeyName(code) {
+  return String(code || "Space").replace(/^Key/, "").replace(/^Digit/, "").replace(/^Arrow/, "");
+}
+
 /* ---------------------------------------------- model providers (BYOM) -- */
 
 let providersCache = null;
@@ -3087,6 +3121,11 @@ function syncSettingsUI() {
   const vs = settings.voice_sensitivity || 1.0;
   $("voice-sensitivity").value = vs;
   $("voice-sensitivity-label").textContent = sensitivityLabel(vs);
+  const sil = settings.voice_silence_ms || 750;
+  $("voice-silence").value = sil;
+  $("voice-silence-label").textContent = silenceLabel(sil);
+  $("opt-earcons").setAttribute("aria-checked", settings.voice_earcons !== false);
+  $("voice-ptt-key-label").textContent = pttKeyName(settings.voice_ptt_key || "Space");
   applyModeChip();
   applyReadAloudChip();
 }
@@ -3692,7 +3731,8 @@ const voice = {
   speaking: false, thinking: false, transcribing: false, turnComplete: true,
   voiceFrames: 0, voicedMs: 0, silenceMs: 0, recMs: 0,
   noiseFloor: 0.01, sens: 1.0, announceQ: [], workers: {}, sendTries: 0,
-  perm: null, permQ: [],
+  perm: null, permQ: [], muted: false, pttKey: "Space", endpointMs: 750,
+  waveRaf: 0, lastReply: [], replyChunks: [], curTurnEl: null, replyEl: null,
 };
 const V_FRAME_MS = 50;         // VAD poll cadence
 const V_CAL_MS = 500;          // ambient sampling at start to seed the noise floor
@@ -3738,8 +3778,19 @@ async function startVoice() {
   voice.workers = {};
   voice.perm = null;
   voice.permQ = [];
+  voice.muted = false;
+  voice.lastReply = [];
+  voice.replyChunks = [];
+  voice.curTurnEl = null;
+  voice.replyEl = null;
   $("voice-perm").hidden = true;
+  $("voice-replay").hidden = true;
+  $("voice-mute").setAttribute("aria-pressed", "false");
+  $("voice-mute").classList.remove("active");
+  $("voice-caption").innerHTML = "";
   voice.sens = (settings && settings.voice_sensitivity) || 1.0;
+  voice.pttKey = (settings && settings.voice_ptt_key) || "Space";
+  voice.endpointMs = (settings && settings.voice_silence_ms) || 750;
   renderVoiceWorkers();
   $("voice-caption").textContent = "";
   $("voice-overlay").hidden = false;
@@ -3754,6 +3805,7 @@ async function startVoice() {
   voice.data = new Uint8Array(voice.analyser.fftSize);
   src.connect(voice.analyser);
   onTtsIdle = onVoiceTtsIdle;
+  startWaveform();
   // Calibrate to the room: sample ambient energy briefly and seed the noise
   // floor from it, so the very first utterance already has sane thresholds.
   if (!voice.ptt) { setVoiceStatus("Calibrating to the room…"); setVoiceOrb("thinking"); }
@@ -3789,6 +3841,7 @@ function stopVoice() {
   onTtsIdle = null;
   resetTtsPlayback();
   voice.speaking = voice.thinking = false;
+  if (voice.waveRaf) { cancelAnimationFrame(voice.waveRaf); voice.waveRaf = 0; }
   if (voice.timer) { clearInterval(voice.timer); voice.timer = 0; }
   try { if (voice.rec && voice.recording) voice.rec.stop(); } catch (e) { /* ignore */ }
   voice.recording = false;
@@ -3813,7 +3866,7 @@ function micEnergy() {
 // Adaptive endpointing state machine. Skipped in push-to-talk mode (there the
 // button/Space drives start/stop directly).
 function vadTick() {
-  if (!voice.active || voice.ptt) return;
+  if (!voice.active || voice.ptt || voice.muted) return;
   const e = micEnergy();
   const orb = $("voice-orb");
   if (orb) orb.style.setProperty("--amp", Math.min(1, e / (voice.noiseFloor * 12 + 0.04)).toFixed(3));
@@ -3847,7 +3900,7 @@ function recordingTick(e) {
     setVoiceStatus("Listening…");
   }
   if (voice.confirmed) {
-    if (voice.silenceMs >= V_SILENCE_MS) endUtterance();
+    if (voice.silenceMs >= voice.endpointMs) endUtterance();
   } else if (voice.silenceMs >= V_BLIP_MS || voice.recMs >= V_MAX_UNCONFIRMED_MS) {
     endUtterance();  // never became real speech -- drop it
   }
@@ -3882,6 +3935,7 @@ function endUtterance() {
   voice.recording = false;
   // Keep only confirmed clips with enough voiced audio; blips are dropped.
   voice.discard = !voice.confirmed;
+  if (!voice.discard) earcon("endpoint");  // a quick "heard you" cue
   try { voice.rec.stop(); } catch (e) { /* onstop still fires */ }
 }
 
@@ -3911,18 +3965,58 @@ async function finishUtterance() {
   } catch (e) { /* ignore */ }
   voice.transcribing = false;
   if (!text || !voice.active) { idleOrListen(); return; }
-  $("voice-caption").innerHTML = `<div class="voice-you">${esc(text)}</div>`;
   // If a worker is waiting on a yes/no, this utterance answers that -- not a
   // new request for the delegator.
   if (voice.perm) {
     const ans = classifyPermission(text);
-    if (ans) { resolvePerm(ans); return; }
+    if (ans) { addVoiceTurn(text, false); resolvePerm(ans); return; }
     toast("Say “yes”, “no”, or “always” — or tap a button.", "info", 3500);
     setVoiceStatus("Needs your OK — say “yes” or “no”");
     return;
   }
+  // "Say that again" / "repeat" -> replay the last reply instead of a new turn.
+  if (voice.lastReply.length && classifyReplay(text)) { replayLastReply(); return; }
+  addVoiceTurn(text, false);
   voice.sendTries = 0;
   sendVoiceTurn(text);
+}
+
+// -- scrolling transcript in the overlay ---------------------------------- //
+function addVoiceTurn(text, isReply) {
+  const cap = $("voice-caption");
+  if (!isReply) {
+    const block = document.createElement("div");
+    block.className = "voice-turn";
+    const you = document.createElement("div");
+    you.className = "voice-you";
+    you.textContent = text;
+    block.appendChild(you);
+    cap.appendChild(block);
+    voice.curTurnEl = block;
+    voice.replyEl = null;
+  }
+  cap.scrollTop = cap.scrollHeight;
+}
+// Returns the live <.voice-it> element for the reply being spoken, creating a
+// block for it (announcements have no preceding user turn).
+function voiceReplyEl() {
+  if (voice.replyEl) return voice.replyEl;
+  let block = voice.curTurnEl;
+  if (!block || block.querySelector(".voice-it")) {
+    block = document.createElement("div");
+    block.className = "voice-turn";
+    $("voice-caption").appendChild(block);
+    voice.curTurnEl = block;
+  }
+  const it = document.createElement("div");
+  it.className = "voice-it";
+  block.appendChild(it);
+  voice.replyEl = it;
+  return it;
+}
+function classifyReplay(text) {
+  const t = " " + text.toLowerCase().replace(/[^a-z\s]/g, " ") + " ";
+  return /\b(say that again|repeat that|repeat|come again|what did you say|again please)\b/.test(t);
 }
 
 function idleOrListen() {
@@ -4058,24 +4152,21 @@ function workerActivity(kind, data) {
 function handleVoiceEvent(ev) {
   switch (ev.type) {
     case "stream_start":
-      $("voice-caption").querySelector(".voice-it")?.remove();
       voice._replyBuf = "";
+      voice.replyEl = null;
+      voice.replyChunks = [];
       voice.turnComplete = false;  // a reply is now being generated + spoken
       break;
     case "content": {
       voice._replyBuf = (voice._replyBuf || "") + (ev.text || "");
-      let it = $("voice-caption").querySelector(".voice-it");
-      if (!it) {
-        it = document.createElement("div");
-        it.className = "voice-it";
-        $("voice-caption").appendChild(it);
-      }
-      it.textContent = voice._replyBuf;
+      voiceReplyEl().textContent = voice._replyBuf;
+      $("voice-caption").scrollTop = $("voice-caption").scrollHeight;
       break;
     }
     case "play_audio":
       voice.speaking = true;
       voice.thinking = false;
+      if (ev.src) voice.replyChunks.push(ev.src);  // for "say that again"
       setVoiceOrb("speaking");
       setVoiceStatus("Speaking…");
       handlePlayAudio(ev);
@@ -4088,6 +4179,7 @@ function handleVoiceEvent(ev) {
       voice.workers[ev.id] = { name: ev.name, status: ev.status, activity: prev.activity || "" };
       renderVoiceWorkers();
       if (ev.status === "done" || ev.status === "error") {
+        earcon(ev.status === "done" ? "done" : "stop");  // a cue before it speaks up
         voice.announceQ.push({ name: ev.name, status: ev.status, result: ev.result || "" });
         processAnnounceQueue();
       }
@@ -4113,6 +4205,10 @@ function handleVoiceEvent(ev) {
       // playing (a silent worker dispatch, or audio already finished), resume
       // now.
       voice.turnComplete = true;
+      if (voice.replyChunks.length) {
+        voice.lastReply = voice.replyChunks.slice();
+        $("voice-replay").hidden = false;
+      }
       if (!ttsPlaying && voice.active) onVoiceTtsIdle();
       break;
     case "error":
@@ -4148,8 +4244,83 @@ function pttRelease() {
   endUtterance();
 }
 
+// -- earcons: tiny synthesized cues so turn-taking feels responsive -------- //
+function earcon(kind) {
+  if (!settings || !settings.voice_earcons || !voice.ctx) return;
+  try {
+    const ctx = voice.ctx;
+    const now = ctx.currentTime;
+    const o = ctx.createOscillator();
+    const g = ctx.createGain();
+    o.connect(g); g.connect(ctx.destination);
+    const map = { endpoint: [660, 0.07], done: [784, 0.11], stop: [360, 0.13] };
+    const [freq, dur] = map[kind] || [600, 0.08];
+    o.type = "sine";
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, now);
+    g.gain.exponentialRampToValueAtTime(0.09, now + 0.012);
+    g.gain.exponentialRampToValueAtTime(0.0001, now + dur);
+    o.start(now); o.stop(now + dur + 0.02);
+  } catch (e) { /* ignore */ }
+}
+
+// -- live waveform ---------------------------------------------------------- //
+function startWaveform() {
+  const canvas = $("voice-wave");
+  if (!canvas || !voice.analyser) return;
+  const ctx2d = canvas.getContext("2d");
+  const buf = new Uint8Array(voice.analyser.fftSize);
+  const draw = () => {
+    if (!voice.active) return;
+    voice.waveRaf = requestAnimationFrame(draw);
+    const w = canvas.width, h = canvas.height;
+    ctx2d.clearRect(0, 0, w, h);
+    voice.analyser.getByteTimeDomainData(buf);
+    const accent = getComputedStyle(document.documentElement)
+      .getPropertyValue("--accent").trim() || "#7aa0ff";
+    ctx2d.lineWidth = 2;
+    ctx2d.strokeStyle = voice.muted ? "rgba(140,140,150,0.5)"
+      : (voice.speaking ? "#34c759" : accent);
+    ctx2d.beginPath();
+    const step = w / buf.length;
+    for (let i = 0; i < buf.length; i++) {
+      const v = voice.muted ? 0 : (buf[i] - 128) / 128;
+      const y = h / 2 + v * (h / 2) * 0.9;
+      const x = i * step;
+      i ? ctx2d.lineTo(x, y) : ctx2d.moveTo(x, y);
+    }
+    ctx2d.stroke();
+  };
+  draw();
+}
+
+// -- mute: pause listening without ending the session ---------------------- //
+function toggleMute() {
+  voice.muted = !voice.muted;
+  if (voice.stream) voice.stream.getAudioTracks().forEach((t) => { t.enabled = !voice.muted; });
+  if (voice.muted && voice.recording) endUtterance();
+  $("voice-mute").setAttribute("aria-pressed", String(voice.muted));
+  $("voice-mute").classList.toggle("active", voice.muted);
+  if (voice.muted) { setVoiceOrb("idle"); setVoiceStatus("Muted — tap the mic to resume"); }
+  else idleOrListen();
+}
+
+// -- "say that again": replay the last spoken reply ------------------------ //
+function replayLastReply() {
+  if (!voice.lastReply.length) return;
+  if (voice.recording) endUtterance();
+  interruptReply();          // stop anything currently playing first
+  voice.speaking = true;
+  voice.turnComplete = true;  // a replay, not a new generation
+  setVoiceOrb("speaking");
+  setVoiceStatus("Replaying…");
+  for (const src of voice.lastReply) enqueueTtsPlayback(src);
+}
+
 $("voice-chip").addEventListener("click", () => { if (voice.active) stopVoice(); else startVoice(); });
 $("voice-close").addEventListener("click", stopVoice);
+$("voice-mute").addEventListener("click", toggleMute);
+$("voice-replay").addEventListener("click", replayLastReply);
 $("voice-perm-yes").addEventListener("click", () => resolvePerm("y"));
 $("voice-perm-always").addEventListener("click", () => resolvePerm("a"));
 $("voice-perm-no").addEventListener("click", () => resolvePerm("n"));
@@ -4158,14 +4329,14 @@ $("voice-ptt-btn").addEventListener("mousedown", pttPress);
 $("voice-ptt-btn").addEventListener("mouseup", pttRelease);
 $("voice-ptt-btn").addEventListener("mouseleave", pttRelease);
 window.addEventListener("keydown", (e) => {
-  if (e.code === "Space" && voice.active && voice.ptt && !e.repeat &&
+  if (e.code === voice.pttKey && voice.active && voice.ptt && !e.repeat &&
       document.activeElement?.tagName !== "INPUT" &&
       document.activeElement?.tagName !== "TEXTAREA") {
     e.preventDefault(); pttPress();
   }
 });
 window.addEventListener("keyup", (e) => {
-  if (e.code === "Space" && voice.active && voice.ptt) { e.preventDefault(); pttRelease(); }
+  if (e.code === voice.pttKey && voice.active && voice.ptt) { e.preventDefault(); pttRelease(); }
 });
 
 function bootSafely() {

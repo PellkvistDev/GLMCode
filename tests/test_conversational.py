@@ -4,8 +4,10 @@ worker on its own thread, never blocking the conversation) with the outcome
 surfaced through worker_update events. The heavy work is scripted, no network.
 """
 
+import sys
 import threading
 import time
+import types
 
 from glmcode.agent import Agent
 from glmcode.api import ApiError
@@ -232,3 +234,48 @@ def test_run_turn_dispatches_without_blocking(monkeypatch, events):
     # A worker was dispatched from inside the turn and runs to completion.
     assert "wk1" in convo._workers
     assert _wait_worker(convo, "wk1") == "done"
+
+
+# -- persist voice conversation into the chat transcript ------------------- #
+
+sys.modules.setdefault("webview", types.SimpleNamespace(
+    Window=object, FOLDER_DIALOG=object(), OPEN_DIALOG=object(), SAVE_DIALOG=object()))
+from glmcode.gui import app as gui_app  # noqa: E402
+
+
+class _RecTranscript:
+    def __init__(self):
+        self.users, self.assistants = [], []
+
+    def user(self, text, label="User"):
+        self.users.append((label, text))
+
+    def assistant(self, text, tool_calls=None):
+        self.assistants.append(text)
+
+
+def _fake_cs(reply_text, tr):
+    convo = types.SimpleNamespace(messages=[
+        {"role": "user", "content": "do the thing"},
+        {"role": "assistant", "content": reply_text},
+    ])
+    agent = types.SimpleNamespace(transcript=tr)
+    return types.SimpleNamespace(agent=agent, convo_agent=convo)
+
+
+def test_persist_voice_turn_logs_user_and_reply():
+    api = gui_app.Api.__new__(gui_app.Api)
+    tr = _RecTranscript()
+    cs = _fake_cs("Sure, on it.", tr)
+    api._persist_voice_turn(cs, "please do the thing")
+    assert tr.users == [("Voice", "please do the thing")]
+    assert tr.assistants == ["Sure, on it."]
+
+
+def test_persist_voice_turn_skips_user_for_announcements():
+    api = gui_app.Api.__new__(gui_app.Api)
+    tr = _RecTranscript()
+    cs = _fake_cs("The build finished.", tr)
+    api._persist_voice_turn(cs, "")   # announcement: no user utterance
+    assert tr.users == []             # nothing logged as user input
+    assert tr.assistants == ["The build finished."]

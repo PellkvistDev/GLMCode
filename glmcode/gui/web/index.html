@@ -243,14 +243,23 @@
     <div class="voice-head">
       <h2>Voice</h2>
       <div class="voice-head-actions">
+        <button id="voice-mute" class="icon-btn" aria-label="Mute microphone" aria-pressed="false" title="Mute — pause listening without ending the session">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/>
+            <path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>
+          </svg>
+        </button>
         <button id="voice-ptt-toggle" class="chip chip-btn" role="switch" aria-checked="false"
-                title="Push-to-talk: hold Space to speak instead of hands-free listening">Hands-free</button>
+                title="Push-to-talk: hold the set key to speak instead of hands-free listening">Hands-free</button>
         <button id="voice-close" class="icon-btn" aria-label="End voice conversation" title="End voice conversation">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
         </button>
       </div>
     </div>
-    <div id="voice-orb" class="voice-orb" aria-hidden="true"><span class="voice-orb-core"></span></div>
+    <div class="voice-orb-wrap">
+      <div id="voice-orb" class="voice-orb" aria-hidden="true"><span class="voice-orb-core"></span></div>
+      <canvas id="voice-wave" class="voice-wave" width="360" height="56" aria-hidden="true"></canvas>
+    </div>
     <div id="voice-status" class="voice-status">Starting…</div>
     <div id="voice-caption" class="voice-caption" aria-live="polite"></div>
     <div id="voice-perm" class="voice-perm" hidden>
@@ -266,6 +275,7 @@
     <div id="voice-workers" class="voice-workers" aria-live="polite"></div>
     <div class="voice-foot">
       <button id="voice-ptt-btn" class="btn btn-primary voice-ptt-btn" hidden>Hold to talk</button>
+      <button id="voice-replay" class="btn btn-ghost" hidden>↺ Say that again</button>
       <span id="voice-hint" class="row-sub">Just start talking. Tell it what to build — it'll delegate and keep listening.</span>
     </div>
   </div>
@@ -427,6 +437,21 @@
         <div class="row-text"><label for="voice-sensitivity">Voice conversation sensitivity</label>
           <span class="row-sub" id="voice-sensitivity-label">Normal</span></div>
         <input type="range" id="voice-sensitivity" min="0.5" max="2.0" step="0.1" value="1.0" class="speed-slider">
+      </div>
+      <div class="row">
+        <div class="row-text"><label for="voice-silence">End-of-turn pause</label>
+          <span class="row-sub" id="voice-silence-label">0.75s</span></div>
+        <input type="range" id="voice-silence" min="400" max="1600" step="50" value="750" class="speed-slider">
+      </div>
+      <div class="row">
+        <div class="row-text"><label for="opt-earcons">Sound cues</label>
+          <span class="row-sub">Little tones when it hears you and when work finishes</span></div>
+        <button id="opt-earcons" class="switch" role="switch" aria-checked="true"><span></span></button>
+      </div>
+      <div class="row">
+        <div class="row-text"><label for="voice-ptt-key">Push-to-talk key</label>
+          <span class="row-sub" id="voice-ptt-key-label">Space</span></div>
+        <button id="voice-ptt-key" class="btn btn-ghost">Click, then press a key</button>
       </div>
     </section>
 

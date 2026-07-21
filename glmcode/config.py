@@ -142,6 +142,9 @@ class Config:
     stt_language: str = ""           # "" = auto-detect language
     tts_speed: float = 1.0           # Kokoro speech speed, 0.5-2.0
     voice_sensitivity: float = 1.0   # mic sensitivity for voice mode, 0.5-2.0 (higher = picks up quieter speech)
+    voice_earcons: bool = True       # short tones on turn hand-off in voice mode
+    voice_ptt_key: str = "Space"     # push-to-talk key (KeyboardEvent.code)
+    voice_silence_ms: int = 750      # trailing silence (ms) that ends your turn, 400-1600
     # Custom model providers: [{"name", "base_url", "api_key", "models": [..]}].
     # Any OpenAI-compatible endpoint works; chats pick a provider+model in
     # Settings (per chat -- the free z.ai default stays the default).

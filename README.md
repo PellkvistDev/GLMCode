@@ -393,7 +393,16 @@ tells you out loud. Ask "how's it going?" any time and it'll check.
   This is what lets hands-free work happen in *ask* mode instead of stalling —
   you don't have to hand it full-auto to use your voice.
 - **See what it's doing** — each worker shows a live one-line status (editing
-  auth.py, running tests, …) so the work isn't a black box while it runs.
+  auth.py, running tests, …) so the work isn't a black box while it runs. The
+  overlay keeps a scrolling transcript of the conversation and a live waveform.
+- **"Say that again"** — replays the last spoken reply (say it, or tap the
+  button) if you missed it.
+- **Sound cues, mute, and tuning** — little tones when it hears you and when
+  work finishes; a mute button to pause listening without ending the session;
+  and, in **Settings → Dictation**, an end-of-turn pause slider, a rebindable
+  push-to-talk key, and a toggle for the sound cues.
+- **It's saved** — the voice conversation is written into the chat's
+  searchable transcript, so it isn't lost when you close the overlay.
 - **Sensitivity** — one slider in **Settings → Dictation** if you want it to
   pick up quieter speech, or to ignore more background noise.
 - **Warm start** — opening a voice session pre-loads the speech models in the

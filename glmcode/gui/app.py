@@ -847,6 +847,8 @@ class Api:
             "read_aloud": c.read_aloud, "tts_voice": c.tts_voice, "tts_speed": c.tts_speed,
             "stt_model": c.stt_model, "stt_language": c.stt_language,
             "voice_sensitivity": c.voice_sensitivity,
+            "voice_earcons": c.voice_earcons, "voice_ptt_key": c.voice_ptt_key,
+            "voice_silence_ms": c.voice_silence_ms,
             "notifications": c.notifications, "reduce_effects": c.reduce_effects,
             "browser_headless": c.browser_headless,
             "browser_keep_logins": c.browser_keep_logins,
@@ -878,6 +880,15 @@ class Api:
         elif key == "voice_sensitivity":
             try:
                 c.voice_sensitivity = min(2.0, max(0.5, float(value)))
+            except (TypeError, ValueError):
+                pass
+        elif key == "voice_earcons":
+            c.voice_earcons = bool(value)
+        elif key == "voice_ptt_key" and isinstance(value, str) and value.strip():
+            c.voice_ptt_key = value.strip()[:32]
+        elif key == "voice_silence_ms":
+            try:
+                c.voice_silence_ms = int(min(1600, max(400, float(value))))
             except (TypeError, ValueError):
                 pass
         elif key == "tts_speed":
@@ -1844,7 +1855,7 @@ class Api:
             return {"error": "busy"}
         self._ensure_convo(cs)
         threading.Thread(target=self._run_convo_turn,
-                         args=(cs, {"role": "user", "content": text}),
+                         args=(cs, {"role": "user", "content": text}, text),
                          daemon=True).start()
         return {"ok": True, "started": True}
 
@@ -1869,10 +1880,16 @@ class Api:
                          daemon=True).start()
         return {"ok": True, "started": True}
 
-    def _run_convo_turn(self, cs: "ChatState", msg: dict) -> None:
+    def _run_convo_turn(self, cs: "ChatState", msg: dict,
+                        user_text: str = "") -> None:
         """Body of one voice turn, on its own thread. Mirrors _run_send_turn but
         for the delegator agent: no @-mentions, no backups, no titling -- just
-        talk. The convo_lock (acquired by the caller) is released here."""
+        talk. The convo_lock (acquired by the caller) is released here.
+
+        `user_text` is the user's spoken words for a real turn (logged to the
+        chat's searchable transcript so the voice conversation persists); empty
+        for internal turns (worker announcements), which aren't logged as user
+        input."""
         convo, ev = cs.convo_agent, cs.convo_events
         ok = False
         try:
@@ -1883,7 +1900,33 @@ class Api:
             ev.error(f"{type(e).__name__}: {e}")
         finally:
             cs.convo_lock.release()
+            self._persist_voice_turn(cs, user_text)
             ev.emit("voice_turn_complete", ok=ok)
+
+    def _persist_voice_turn(self, cs: "ChatState", user_text: str) -> None:
+        """Append a completed voice exchange to the chat's searchable transcript
+        (the same append-only log the coding agent uses), so a voice
+        conversation isn't lost when the overlay closes -- and the coding agent
+        can even grep it later. Best-effort."""
+        tr = getattr(cs.agent, "transcript", None)
+        if tr is None:
+            return
+        try:
+            reply = self._last_convo_reply(cs)
+            if user_text:
+                tr.user(user_text, label="Voice")
+            if reply:
+                tr.assistant(reply)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _last_convo_reply(cs: "ChatState") -> str:
+        for m in reversed(cs.convo_agent.messages):
+            if m.get("role") == "assistant" and isinstance(m.get("content"), str) \
+                    and m["content"].strip():
+                return m["content"].strip()
+        return ""
 
     def execute_plan(self):
         """The 'Execute plan' button: a normal (non-plan) turn with a canned

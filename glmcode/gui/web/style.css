@@ -1590,6 +1590,7 @@ body.sidebar-open #sidebar { transform: translateX(0); }
 
 /* -------------------------------------------------------- voice mode -- */
 #voice-chip.active { color: #ff453a; background: rgba(255, 69, 58, 0.14); }
+#voice-mute.active { color: #ff453a; background: rgba(255, 69, 58, 0.14); }
 
 .voice-overlay {
   position: fixed; inset: 0; z-index: 60;
@@ -1632,11 +1633,19 @@ body.sidebar-open #sidebar { transform: translateX(0); }
 @keyframes voice-pulse { 50% { box-shadow: 0 0 46px rgba(52, 199, 89, 0.7); } }
 @keyframes voice-spin { to { transform: rotate(360deg); } }
 
+.voice-orb-wrap { display: flex; flex-direction: column; align-items: center; gap: 6px; width: 100%; }
+.voice-wave { width: 100%; max-width: 360px; height: 44px; opacity: 0.9; }
+
 .voice-status { font-size: 14px; color: var(--muted); min-height: 18px; }
 .voice-caption {
-  width: 100%; min-height: 20px; text-align: center; font-size: 15px; line-height: 1.5;
+  width: 100%; max-height: 34vh; overflow-y: auto; font-size: 15px; line-height: 1.5;
+  display: flex; flex-direction: column; gap: 12px; text-align: left;
 }
-.voice-you { color: var(--muted); font-style: italic; margin-bottom: 6px; }
+.voice-caption:empty { display: none; }
+.voice-turn { display: flex; flex-direction: column; gap: 3px; }
+.voice-you { color: var(--muted); font-style: italic; }
+.voice-you::before { content: "“"; }
+.voice-you::after { content: "”"; }
 .voice-it { color: var(--text); }
 .voice-workers {
   width: 100%; display: flex; flex-wrap: wrap; gap: 6px; justify-content: center;
