@@ -2944,9 +2944,12 @@ function shortPath(p) {
 }
 
 $("settings-btn").addEventListener("click", async () => {
-  const u = await api().usage();
-  $("session-usage").textContent =
-    `${fmtTokens(u.completion_tokens)} output · ${fmtTokens(u.prompt_tokens)} sent · context ~${fmtTokens(u.context)} · $0.00`;
+  // Re-sync the toggles/segments to the CURRENT settings every time the sheet
+  // opens. It's cheap and idempotent, and it makes the sheet correct no matter
+  // what happened at boot -- the boot-time sync could silently not "stick" on
+  // some WebView2 builds (controls styled while their subtree is still hidden),
+  // which left the first open showing nothing selected until a change re-ran it.
+  syncSettingsUI();
   $("settings-backdrop").hidden = false;
   populateVoiceSelect();
   populateBackups();
@@ -2954,6 +2957,11 @@ $("settings-btn").addEventListener("click", async () => {
   populateBrowserModelSelect();
   populateMcp();
   populateCommands();
+  try {
+    const u = await api().usage();
+    $("session-usage").textContent =
+      `${fmtTokens(u.completion_tokens)} output · ${fmtTokens(u.prompt_tokens)} sent · context ~${fmtTokens(u.context)} · $0.00`;
+  } catch (e) { /* usage line is non-critical */ }
 });
 
 /* Dedicated Browser Agent model: every configured provider's models, plus
