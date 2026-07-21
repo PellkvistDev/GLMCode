@@ -348,6 +348,22 @@ speed). The **first** use of either feature installs a small package
 (`kokoro-onnx`) and downloads the Kokoro model (~300MB total, one-time,
 needs network access); everything after that runs fully offline.
 
+### Dictation
+
+Talk instead of type. Click the mic in the composer to start recording,
+click it again to stop — the clip is transcribed **locally** with
+[faster-whisper](https://github.com/SYSTRAN/faster-whisper) and dropped
+into the box for you to review and send. No API key, no per-use cost, and
+nothing leaves the machine.
+
+Pick the model and language in **Settings → Dictation**. Smaller models
+(`tiny`/`base`) are near-instant on a CPU and fine for everyday dictation;
+larger ones (`small`/`medium`) trade speed for accuracy. `.en` variants are
+English-only and a touch sharper for English. Language defaults to
+auto-detect. The **first** use installs `faster-whisper` and downloads the
+chosen model (size shown next to each in Settings, one-time, needs network
+access); everything after that runs fully offline.
+
 ### Backups
 
 Optional, per-chat, on by default: before each message runs, your project's

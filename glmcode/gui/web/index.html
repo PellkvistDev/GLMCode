@@ -147,6 +147,9 @@
     <button id="attach-btn" class="icon-btn" aria-label="Attach files" title="Attach files">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>
     </button>
+    <button id="mic-btn" class="icon-btn" aria-label="Dictate" title="Dictate — click to record, click again to transcribe into the box">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/></svg>
+    </button>
     <textarea id="input" rows="1" placeholder="Ask anything…  (type @ to add a file)"
               aria-label="Message"></textarea>
     <button id="send-btn" class="send-btn" aria-label="Send message" title="Send (Enter)">
@@ -359,6 +362,26 @@
         <div class="row-text"><label for="voice-speed">Speed</label>
           <span class="row-sub" id="voice-speed-label">1.0x</span></div>
         <input type="range" id="voice-speed" min="0.5" max="2.0" step="0.1" value="1.0" class="speed-slider">
+      </div>
+    </section>
+
+    <section>
+      <h3>Dictation</h3>
+      <p class="row-sub">Click the mic in the composer to record, click again to transcribe into
+         the box. Runs locally via faster-whisper — no API cost.</p>
+      <div class="row">
+        <div class="row-text"><label for="stt-model">Model</label>
+          <span class="row-sub" id="stt-first-use-note" hidden>First use downloads the model, one-time</span></div>
+        <div class="row-actions">
+          <select id="stt-model" class="voice-select"></select>
+        </div>
+      </div>
+      <div class="row">
+        <div class="row-text"><label for="stt-language">Language</label>
+          <span class="row-sub">Leave on Auto-detect unless it keeps guessing wrong</span></div>
+        <div class="row-actions">
+          <select id="stt-language" class="voice-select"></select>
+        </div>
       </div>
     </section>
 

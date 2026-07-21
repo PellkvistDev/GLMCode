@@ -819,6 +819,7 @@ class Api:
             "cwd": str(Path.cwd()) if self.session_id else "",
             "background_custom": bool(c.background_path),
             "read_aloud": c.read_aloud, "tts_voice": c.tts_voice, "tts_speed": c.tts_speed,
+            "stt_model": c.stt_model, "stt_language": c.stt_language,
             "notifications": c.notifications, "reduce_effects": c.reduce_effects,
             "browser_headless": c.browser_headless,
             "browser_keep_logins": c.browser_keep_logins,
@@ -843,6 +844,10 @@ class Api:
                 self._agent.rebuild_system_prompt()
         elif key == "tts_voice" and isinstance(value, str) and value.strip():
             c.tts_voice = value.strip()
+        elif key == "stt_model" and isinstance(value, str) and value.strip():
+            c.stt_model = value.strip()
+        elif key == "stt_language" and isinstance(value, str):
+            c.stt_language = value.strip()
         elif key == "tts_speed":
             try:
                 c.tts_speed = min(2.0, max(0.5, float(value)))
@@ -868,6 +873,13 @@ class Api:
         from .. import tts as tts_mod
         return {"voices": tts_mod.list_voices()}
 
+    def stt_status(self, model: str = ""):
+        """Whether dictation is ready to go for the given model (packages
+        installed AND that model already downloaded). Settings uses this to
+        show/hide the one-time-download note."""
+        from .. import stt as stt_mod
+        return {"ready": stt_mod.ready(model or stt_mod.DEFAULT_MODEL)}
+
     def preview_voice(self, voice: str):
         """Synthesize (once, then cached on disk) and return a short sample
         of the given voice so Settings can offer an audition button. Can
@@ -887,6 +899,41 @@ class Api:
             return {"ok": True, "src": _data_uri(cache_path)}
         except OSError as e:
             return {"error": str(e)}
+
+    # -- speech-to-text (voice input) -------------------------------------- #
+
+    def transcribe_audio(self, data_url: str):
+        """Transcribe a recorded audio clip (a base64 data URL captured by the
+        composer's mic button) to text, locally via faster-whisper. Returns
+        {"text": ...}; the FIRST call installs faster-whisper + downloads the
+        model (~50MB+), same one-time cost as the other local models."""
+        from .. import stt as stt_mod
+        try:
+            head, _, b64 = str(data_url or "").partition(",")
+            if not b64 or not head.startswith("data:audio"):
+                return {"error": "No audio was captured."}
+            ext = ".webm" if "webm" in head else (".ogg" if "ogg" in head else ".wav")
+            raw = base64.b64decode(b64)
+            if len(raw) < 512:
+                return {"text": ""}   # basically silence / an empty clip
+        except Exception:
+            return {"error": "Could not read the recorded audio."}
+        folder = CONFIG_DIR / "stt-tmp"
+        folder.mkdir(parents=True, exist_ok=True)
+        path = folder / (uuid.uuid4().hex + ext)
+        try:
+            path.write_bytes(raw)
+            text = stt_mod.transcribe(
+                path, model=(self._cfg.stt_model or stt_mod.DEFAULT_MODEL),
+                language=self._cfg.stt_language, status=self._events.info)
+            return {"text": text}
+        except Exception as e:
+            return {"error": f"Transcription failed: {e}"}
+        finally:
+            try:
+                path.unlink()
+            except OSError:
+                pass
 
     # -- background ---------------------------------------------------------- #
 

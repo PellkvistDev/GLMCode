@@ -2298,6 +2298,77 @@ $("attach-btn").addEventListener("click", async () => {
   }
 });
 
+/* ---- dictation (voice -> composer text) -------------------------------- --
+   Click the mic to record; click again to stop, transcribe locally (faster-
+   whisper via Api.transcribe_audio), and drop the text into the composer. */
+const mic = { rec: null, stream: null, chunks: [], busy: false };
+
+function setMicState(state) {
+  const btn = $("mic-btn");
+  btn.classList.toggle("recording", state === "recording");
+  btn.classList.toggle("busy", state === "busy");
+  btn.title = state === "recording" ? "Stop & transcribe"
+    : state === "busy" ? "Transcribing…"
+    : "Dictate — click to record, click again to transcribe into the box";
+}
+
+async function startDictation() {
+  if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+    toast("This build can't access the microphone.", "error", 5000);
+    return;
+  }
+  let stream;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+  } catch (e) {
+    toast("Microphone permission was denied.", "error", 5000);
+    return;
+  }
+  mic.stream = stream;
+  mic.chunks = [];
+  const rec = new MediaRecorder(stream);
+  mic.rec = rec;
+  rec.addEventListener("dataavailable", (e) => { if (e.data.size) mic.chunks.push(e.data); });
+  rec.addEventListener("stop", finishDictation);
+  rec.start();
+  setMicState("recording");
+}
+
+function finishDictation() {
+  const stream = mic.stream;
+  if (stream) stream.getTracks().forEach((t) => t.stop());
+  mic.stream = null;
+  const blob = new Blob(mic.chunks, { type: (mic.rec && mic.rec.mimeType) || "audio/webm" });
+  mic.rec = null;
+  mic.chunks = [];
+  if (!blob.size) { setMicState("idle"); return; }
+  setMicState("busy");
+  mic.busy = true;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    let res;
+    try { res = await api().transcribe_audio(reader.result); }
+    catch (e) { res = { error: String(e) }; }
+    mic.busy = false;
+    setMicState("idle");
+    if (res && res.error) { toast(res.error, "error", 6000); return; }
+    const text = (res && res.text || "").trim();
+    if (!text) { toast("Didn't catch anything — try again.", "info", 3000); return; }
+    // Insert at the cursor (or append), then let the composer grow/refocus.
+    const sep = input.value && !/\s$/.test(input.value) ? " " : "";
+    input.value = input.value + sep + text;
+    input.dispatchEvent(new Event("input"));
+    input.focus();
+  };
+  reader.readAsDataURL(blob);
+}
+
+$("mic-btn").addEventListener("click", () => {
+  if (mic.busy) return;
+  if (mic.rec && mic.rec.state === "recording") mic.rec.stop();
+  else startDictation();
+});
+
 /* ---- drag & drop attachments ------------------------------------------ --
    Drop files anywhere on the window to attach them. pywebview exposes each
    dropped File's real disk path as `pywebviewFullPath`; the backend turns
@@ -2524,6 +2595,54 @@ $("voice-speed").addEventListener("input", () => {
 });
 $("voice-speed").addEventListener("change", async () => {
   settings = await api().set_setting("tts_speed", parseFloat($("voice-speed").value));
+});
+
+/* ------------------------------------------------ dictation (STT) */
+
+// faster-whisper sizes, smallest→largest. .en variants are English-only and a
+// bit sharper for English; distil-small.en is small+fast. Labels carry the
+// rough download size so the one-time cost isn't a surprise.
+const STT_MODELS = [
+  ["tiny",            "Tiny — fastest, least accurate (~75MB)"],
+  ["base",            "Base — good balance (~145MB)"],
+  ["small",           "Small — more accurate, slower (~480MB)"],
+  ["medium",          "Medium — most accurate, slowest (~1.5GB)"],
+  ["tiny.en",         "Tiny (English only) (~75MB)"],
+  ["base.en",         "Base (English only) (~145MB)"],
+  ["small.en",        "Small (English only) (~480MB)"],
+  ["distil-small.en", "Distil-Small (English only) — fast (~330MB)"],
+];
+// Short list of common languages; empty value = auto-detect.
+const STT_LANGS = [
+  ["", "Auto-detect"], ["en", "English"], ["sv", "Swedish"], ["es", "Spanish"],
+  ["fr", "French"], ["de", "German"], ["it", "Italian"], ["pt", "Portuguese"],
+  ["nl", "Dutch"], ["pl", "Polish"], ["ru", "Russian"], ["uk", "Ukrainian"],
+  ["zh", "Chinese"], ["ja", "Japanese"], ["ko", "Korean"], ["hi", "Hindi"],
+  ["ar", "Arabic"], ["tr", "Turkish"],
+];
+async function populateSttSelect() {
+  const mSel = $("stt-model");
+  mSel.innerHTML = STT_MODELS.map(
+    ([v, label]) => `<option value="${esc(v)}">${esc(label)}</option>`).join("");
+  mSel.value = settings.stt_model || "base";
+  const lSel = $("stt-language");
+  lSel.innerHTML = STT_LANGS.map(
+    ([v, label]) => `<option value="${esc(v)}">${esc(label)}</option>`).join("");
+  lSel.value = settings.stt_language || "";
+  try {
+    const status = await api().stt_status(mSel.value);
+    $("stt-first-use-note").hidden = !!status.ready;
+  } catch { $("stt-first-use-note").hidden = true; }
+}
+$("stt-model").addEventListener("change", async () => {
+  settings = await api().set_setting("stt_model", $("stt-model").value);
+  try {
+    const status = await api().stt_status($("stt-model").value);
+    $("stt-first-use-note").hidden = !!status.ready;
+  } catch { $("stt-first-use-note").hidden = true; }
+});
+$("stt-language").addEventListener("change", async () => {
+  settings = await api().set_setting("stt_language", $("stt-language").value);
 });
 
 /* ---------------------------------------------- model providers (BYOM) -- */
@@ -2952,6 +3071,7 @@ $("settings-btn").addEventListener("click", async () => {
   syncSettingsUI();
   $("settings-backdrop").hidden = false;
   populateVoiceSelect();
+  populateSttSelect();
   populateBackups();
   populateModelPicker();
   populateBrowserModelSelect();

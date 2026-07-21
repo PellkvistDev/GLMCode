@@ -138,6 +138,8 @@ class Config:
     browser_provider: str = ""       # control_chrome: dedicated Browser Agent provider ("" = same as chat)
     browser_model: str = ""          # control_chrome: dedicated Browser Agent model ("" = same as chat)
     tts_voice: str = "af_heart"      # Kokoro voice name
+    stt_model: str = "base"          # faster-whisper model size for voice input
+    stt_language: str = ""           # "" = auto-detect language
     tts_speed: float = 1.0           # Kokoro speech speed, 0.5-2.0
     # Custom model providers: [{"name", "base_url", "api_key", "models": [..]}].
     # Any OpenAI-compatible endpoint works; chats pick a provider+model in
