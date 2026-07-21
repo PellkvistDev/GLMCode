@@ -3319,9 +3319,23 @@ document.addEventListener("keydown", (e) => {
 /* ------------------------------------------------ onboarding */
 
 $("key-save").addEventListener("click", async () => {
+  const btn = $("key-save");
   const key = $("key-input").value.trim();
-  if (!key) return;
-  const res = await api().save_api_key(key);
+  if (!key || btn.disabled) return;
+  // Persisting the key can take a moment (or a locked-down machine can stall
+  // the env-var write), so show progress and NEVER leave the button looking
+  // dead. A bridge failure surfaces as an error instead of silently nothing.
+  const label = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = "Starting…";
+  let res = null;
+  try {
+    res = await api().save_api_key(key);
+  } catch (e) {
+    res = null;
+  }
+  btn.disabled = false;
+  btn.textContent = label;
   if (res && res.ok) {
     $("key-backdrop").hidden = true;
     toast(res.persisted ? "API key saved to your user environment" :
@@ -3330,7 +3344,8 @@ $("key-save").addEventListener("click", async () => {
     if (res.session) applySession(res.session);
     else showNoSession();
   } else {
-    toast((res && res.error) || "Could not save key", "error");
+    toast((res && res.error) ||
+      "Couldn't start — the key is set for now, try pressing Start again.", "error", 6000);
   }
 });
 $("key-input").addEventListener("keydown", (e) => {

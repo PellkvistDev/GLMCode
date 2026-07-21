@@ -507,13 +507,22 @@ def _thumb_uri(path: Path, size: int = 360) -> str:
 
 
 def persist_env_var(name: str, value: str) -> bool:
+    """Persist an env var to the user's environment (Windows `setx`). Best
+    effort: the value is ALWAYS set for the current process first, so the app
+    works this run no matter what. Persistence is a bonus that must never
+    raise -- a locked-down machine (school/corporate Group Policy) can block
+    or HANG setx, and a TimeoutExpired here used to kill onboarding entirely."""
     from ..tools import NO_WINDOW_KWARGS
-    os.environ[name] = value
+    os.environ[name] = value  # active this run regardless of persistence
+    if sys.platform != "win32":
+        return False          # setx is Windows-only; not a failure elsewhere
     try:
-        r = subprocess.run(["setx", name, value], capture_output=True, timeout=15,
+        r = subprocess.run(["setx", name, value], capture_output=True, timeout=8,
                            **NO_WINDOW_KWARGS)
         return r.returncode == 0
-    except OSError:
+    except Exception:
+        # setx missing, blocked by policy, or hung past the timeout -- fine,
+        # the key still works this session via os.environ above.
         return False
 
 
@@ -737,11 +746,23 @@ class Api:
         key = (key or "").strip()
         if not key:
             return {"error": "empty key"}
-        persisted = persist_env_var("ZAI_API_KEY", key)
+        # Every step is defensive: onboarding must ALWAYS complete once a key
+        # is entered. The key goes live via os.environ inside persist_env_var,
+        # so even if persistence or resuming a prior session fails (a fresh or
+        # locked-down machine), the app still opens ready to use.
+        try:
+            persisted = persist_env_var("ZAI_API_KEY", key)
+        except Exception:
+            persisted = False
         self._client = None
-        session = self._resume_last()
+        session, sessions = None, []
+        try:
+            session = self._resume_last()
+            sessions = self.list_sessions()
+        except Exception:
+            pass
         return {"ok": True, "persisted": persisted, "session": session,
-                "sessions": self.list_sessions()}
+                "sessions": sessions}
 
     def win(self, action: str):
         w = self._window
