@@ -2717,7 +2717,15 @@ $("opt-wake").addEventListener("click", async () => {
   settings = await api().set_setting("voice_wake_enabled", next);
   $("opt-wake").setAttribute("aria-checked", String(next));
   $("wake-word-row").hidden = !next;
+  $("wake-gated-row").hidden = !next;
   refreshWake();
+});
+$("opt-wake-gated").addEventListener("click", async () => {
+  const next = $("opt-wake-gated").getAttribute("aria-checked") !== "true";
+  settings = await api().set_setting("voice_wake_gated", next);
+  $("opt-wake-gated").setAttribute("aria-checked", String(next));
+  // Apply to an open session immediately.
+  if (voice.active) { voice.gated = !!(settings.voice_wake_enabled && next); if (!voice.gated) voice.gateOpen = true; idleOrListen(); }
 });
 $("voice-wake-word").addEventListener("change", async () => {
   const v = $("voice-wake-word").value.trim() || "hey assistant";
@@ -3146,7 +3154,9 @@ function syncSettingsUI() {
   const wakeOn = !!settings.voice_wake_enabled;
   $("opt-wake").setAttribute("aria-checked", wakeOn);
   $("wake-word-row").hidden = !wakeOn;
+  $("wake-gated-row").hidden = !wakeOn;
   $("voice-wake-word").value = settings.voice_wake_word || "hey assistant";
+  $("opt-wake-gated").setAttribute("aria-checked", settings.voice_wake_gated !== false);
   applyModeChip();
   applyReadAloudChip();
 }
@@ -3755,7 +3765,13 @@ const voice = {
   noiseFloor: 0.01, sens: 1.0, announceQ: [], workers: {}, sendTries: 0,
   perm: null, permQ: [], muted: false, pttKey: "Space", endpointMs: 750,
   waveRaf: 0, lastReply: [], replyChunks: [], curTurnEl: null, replyEl: null,
+  gated: false, gateOpen: true,  // wake-gated turns: each request needs the wake word
 };
+// True when we're in a session but "soft-muted" -- listening only for the wake
+// word before we'll accept another request (vs the open state where we take
+// whatever you say). Kept as a helper so every check reads the same.
+const wakeGating = () => voice.gated && !voice.gateOpen && !voice.perm;
+const wakePhrase = () => (settings && settings.voice_wake_word) || "hey assistant";
 const V_FRAME_MS = 50;         // VAD poll cadence
 const V_CAL_MS = 500;          // ambient sampling at start to seed the noise floor
 const V_START_MULT = 3.0;      // start threshold  = noiseFloor * this
@@ -3814,6 +3830,11 @@ async function startVoice() {
   voice.sens = (settings && settings.voice_sensitivity) || 1.0;
   voice.pttKey = (settings && settings.voice_ptt_key) || "Space";
   voice.endpointMs = (settings && settings.voice_silence_ms) || 750;
+  // Wake-gated turns: only when the wake word is on AND gating is enabled. The
+  // session opens ready for your first request (you just summoned it / clicked);
+  // after each request it soft-mutes until it hears the wake word again.
+  voice.gated = !!(settings && settings.voice_wake_enabled && settings.voice_wake_gated);
+  voice.gateOpen = true;
   renderVoiceWorkers();
   $("voice-caption").textContent = "";
   $("voice-overlay").hidden = false;
@@ -3899,8 +3920,11 @@ function vadTick() {
   // Idle: while it's speaking, only a much louder input (barge-in) starts a
   // recording, so its own voice out of the speakers doesn't trip us. Otherwise
   // the recorder starts on the first loud frame -- we capture the onset and
-  // decide later whether to keep it.
-  const gate = voice.speaking ? bargeThresh() : startThresh();
+  // decide later whether to keep it. When soft-muted (wake-gating) we still
+  // record bursts, but only to check them for the wake word -- so we listen
+  // through our own speech too (echo cancellation + the phrase check keep the
+  // TTS from self-triggering).
+  const gate = (voice.speaking && !wakeGating()) ? bargeThresh() : startThresh();
   if (e > gate) {
     startUtterance();
   } else {
@@ -3919,9 +3943,14 @@ function recordingTick(e) {
   // while the agent was talking or thinking, that's a barge-in: cut its reply.
   if (!voice.confirmed && voice.voicedMs >= V_ONSET_MS) {
     voice.confirmed = true;
-    if (voice.speaking || voice.thinking) interruptReply();
-    setVoiceOrb("hearing");
-    setVoiceStatus("Listening…");
+    if (wakeGating()) {
+      // Soft-muted: don't cut the reply or claim we're taking a request -- we
+      // don't know yet whether this burst is the wake word. Decide after STT.
+    } else {
+      if (voice.speaking || voice.thinking) interruptReply();
+      setVoiceOrb("hearing");
+      setVoiceStatus("Listening…");
+    }
   }
   if (voice.confirmed) {
     if (voice.silenceMs >= voice.endpointMs) endUtterance();
@@ -3959,7 +3988,7 @@ function endUtterance() {
   voice.recording = false;
   // Keep only confirmed clips with enough voiced audio; blips are dropped.
   voice.discard = !voice.confirmed;
-  if (!voice.discard) earcon("endpoint");  // a quick "heard you" cue
+  if (!voice.discard && !wakeGating()) earcon("endpoint");  // "heard you" (not while soft-muted)
   try { voice.rec.stop(); } catch (e) { /* onstop still fires */ }
 }
 
@@ -3989,8 +4018,8 @@ async function finishUtterance() {
   } catch (e) { /* ignore */ }
   voice.transcribing = false;
   if (!text || !voice.active) { idleOrListen(); return; }
-  // If a worker is waiting on a yes/no, this utterance answers that -- not a
-  // new request for the delegator.
+  // A pending worker permission takes priority even when soft-muted: the app
+  // asked YOU a yes/no, so it's listening for the answer without a wake word.
   if (voice.perm) {
     const ans = classifyPermission(text);
     if (ans) { addVoiceTurn(text, false); resolvePerm(ans); return; }
@@ -3998,11 +4027,34 @@ async function finishUtterance() {
     setVoiceStatus("Needs your OK — say “yes” or “no”");
     return;
   }
+  // Soft-muted (wake-gated): this burst only counts if it's the wake word.
+  // Anything else -- talking to someone else, thinking aloud -- is ignored, so
+  // it never gets the wrong instruction.
+  if (voice.gated && !voice.gateOpen) {
+    const m = wakeMatches(text);
+    if (!m) { idleOrListen(); return; }        // not for us -- keep listening for the wake word
+    if (voice.speaking || voice.thinking) interruptReply();  // summoned mid-reply: stop and listen
+    voice.gateOpen = true;
+    earcon("wake");
+    if (m.command) { submitVoiceRequest(m.command); }  // said "wake + request" in one breath
+    else { setVoiceOrb("listening"); setVoiceStatus("Yes? Go ahead…"); }
+    return;
+  }
   // "Say that again" / "repeat" -> replay the last reply instead of a new turn.
   if (voice.lastReply.length && classifyReplay(text)) { replayLastReply(); return; }
+  submitVoiceRequest(text);
+}
+
+// Send one request to the delegator, then -- in wake-gated mode -- soft-mute
+// again until the wake word is heard.
+function submitVoiceRequest(text) {
   addVoiceTurn(text, false);
   voice.sendTries = 0;
   sendVoiceTurn(text);
+  if (voice.gated) {
+    voice.gateOpen = false;   // one request per wake word
+    earcon("stop");           // "got it, muting" cue
+  }
 }
 
 // -- scrolling transcript in the overlay ---------------------------------- //
@@ -4046,9 +4098,15 @@ function classifyReplay(text) {
 function idleOrListen() {
   if (!voice.active) return;
   if (voice.perm) { setVoiceOrb("listening"); setVoiceStatus("Needs your OK — say “yes” or “no”"); return; }
-  if (voice.speaking) { setVoiceOrb("speaking"); setVoiceStatus("Speaking…"); }
-  else if (voice.thinking) { setVoiceOrb("thinking"); setVoiceStatus("Thinking…"); }
-  else if (voice.ptt) { setVoiceOrb("idle"); setVoiceStatus("Your turn — hold to talk"); }
+  if (voice.speaking) { setVoiceOrb("speaking"); setVoiceStatus("Speaking…"); return; }
+  if (voice.thinking) { setVoiceOrb("thinking"); setVoiceStatus("Thinking…"); return; }
+  // Soft-muted between requests: won't take instructions until the wake word.
+  if (voice.gated && !voice.gateOpen) {
+    setVoiceOrb("gated");
+    setVoiceStatus(`Muted — say “${wakePhrase()}” to talk`);
+    return;
+  }
+  if (voice.ptt) { setVoiceOrb("idle"); setVoiceStatus("Your turn — hold to talk"); }
   else { setVoiceOrb("listening"); setVoiceStatus("Listening…"); }
 }
 
@@ -4277,7 +4335,7 @@ function earcon(kind) {
     const o = ctx.createOscillator();
     const g = ctx.createGain();
     o.connect(g); g.connect(ctx.destination);
-    const map = { endpoint: [660, 0.07], done: [784, 0.11], stop: [360, 0.13] };
+    const map = { endpoint: [660, 0.07], done: [784, 0.11], stop: [360, 0.13], wake: [740, 0.1] };
     const [freq, dur] = map[kind] || [600, 0.08];
     o.type = "sine";
     o.frequency.value = freq;
@@ -4454,7 +4512,9 @@ async function wakeFinish() {
   if (m) {
     disarmWake();
     await startVoice();
-    if (m.command && voice.active) { addVoiceTurn(m.command, false); voice.sendTries = 0; sendVoiceTurn(m.command); }
+    // "hey assistant, add dark mode" -> open the session AND run that request
+    // (in gated mode submitVoiceRequest re-mutes afterward).
+    if (m.command && voice.active) submitVoiceRequest(m.command);
   }
 }
 

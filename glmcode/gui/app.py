@@ -851,6 +851,7 @@ class Api:
             "voice_silence_ms": c.voice_silence_ms,
             "voice_wake_enabled": c.voice_wake_enabled,
             "voice_wake_word": c.voice_wake_word,
+            "voice_wake_gated": c.voice_wake_gated,
             "voice_reply_language": c.voice_reply_language,
             "notifications": c.notifications, "reduce_effects": c.reduce_effects,
             "browser_headless": c.browser_headless,
@@ -898,6 +899,8 @@ class Api:
             c.voice_wake_enabled = bool(value)
         elif key == "voice_wake_word" and isinstance(value, str) and value.strip():
             c.voice_wake_word = value.strip()[:60]
+        elif key == "voice_wake_gated":
+            c.voice_wake_gated = bool(value)
         elif key == "voice_reply_language" and value in ("en", "match"):
             c.voice_reply_language = value
             # If a voice session is open, refresh its prompt so the change

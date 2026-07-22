@@ -414,6 +414,13 @@ tells you out loud. Ask "how's it going?" any time and it'll check.
   phrase ("hey assistant" by default); the app then listens (locally — nothing
   leaves the machine) and opens a hands-free session when it hears you. Anything
   you say after the phrase becomes the first request.
+  - **Wake word before each request** (on by default with the wake word): after
+    every request it *soft-mutes* — it keeps playing replies and can still be
+    summoned, but it won't take another instruction until it hears the phrase
+    again. So you can work hands-free in a room with other people and it'll
+    never mistake your side-conversation for a command. Say the phrase (even
+    over its own reply) to give the next one. Turn it off for continuous
+    back-and-forth where every utterance is an instruction.
 - **"What did it change?" / "revert that"** — ask and the delegator tells you
   which files a worker touched; say to undo it and it rolls the project back to
   how it was right before that worker ran (it confirms first). Each worker

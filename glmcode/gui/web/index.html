@@ -475,6 +475,12 @@
           <span class="row-sub">What to say to start a session</span></div>
         <input type="text" id="voice-wake-word" class="text-input" placeholder="hey assistant" style="max-width:200px">
       </div>
+      <div class="row" id="wake-gated-row" hidden>
+        <div class="row-text"><label for="opt-wake-gated">Wake word before each request</label>
+          <span class="row-sub">After every request it soft-mutes so side-conversations aren't taken as
+            instructions — say the wake word again to give the next one. You still hear its replies.</span></div>
+        <button id="opt-wake-gated" class="switch" role="switch" aria-checked="true"><span></span></button>
+      </div>
     </section>
 
     <section>

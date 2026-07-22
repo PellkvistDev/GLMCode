@@ -147,6 +147,7 @@ class Config:
     voice_silence_ms: int = 750      # trailing silence (ms) that ends your turn, 400-1600
     voice_wake_enabled: bool = False # listen for a wake word to start voice mode hands-free
     voice_wake_word: str = "hey assistant"  # the spoken phrase that starts a voice session
+    voice_wake_gated: bool = True    # require the wake word before EACH request (soft-mute between)
     voice_reply_language: str = "en"  # spoken reply language: "en" or "match" (the user's spoken language)
     # Custom model providers: [{"name", "base_url", "api_key", "models": [..]}].
     # Any OpenAI-compatible endpoint works; chats pick a provider+model in
