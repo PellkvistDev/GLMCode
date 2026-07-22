@@ -3895,7 +3895,11 @@ function stopVoice() {
   $("voice-chip").setAttribute("aria-pressed", "false");
   $("voice-chip").classList.remove("active");
   try { api().voice_mode(false); } catch (e) { /* ignore */ }
-  refreshWake();  // go back to listening for the wake word, if enabled
+  // Re-arm the wake listener AFTER the voice mic has fully released. Grabbing
+  // the device again in the same tick can fail (still busy), and that failure
+  // used to be swallowed -- leaving the wake word silently not listening after
+  // a session, which looks like the setting turned itself off.
+  setTimeout(refreshWake, 300);
 }
 
 function micEnergy() {
@@ -4411,14 +4415,24 @@ const wake = {
 };
 const WK_FRAME_MS = 60, WK_SILENCE_MS = 550, WK_MIN_MS = 250, WK_MAX_MS = 5000;
 
-async function armWake() {
+async function armWake(retry = true) {
   if (wake.armed || voice.active) return;
   if (!settings || !settings.voice_wake_enabled) return;
   try {
     wake.stream = await navigator.mediaDevices.getUserMedia({
       audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
     });
-  } catch (e) { return; }  // no mic permission -> silently not armed
+  } catch (e) {
+    // The mic can be briefly busy right after a voice session releases it. Try
+    // once more before giving up, so the wake word doesn't silently stay off.
+    if (retry && settings.voice_wake_enabled && !voice.active) setTimeout(() => armWake(false), 700);
+    return;
+  }
+  if (voice.active) {  // a session opened while we were awaiting the mic
+    wake.stream.getTracks().forEach((t) => t.stop());
+    wake.stream = null;
+    return;
+  }
   const Ctx = window.AudioContext || window.webkitAudioContext;
   wake.ctx = new Ctx();
   const src = wake.ctx.createMediaStreamSource(wake.stream);
