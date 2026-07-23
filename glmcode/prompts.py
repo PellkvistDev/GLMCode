@@ -50,7 +50,7 @@ Mimic the codebase you are in: match its naming, formatting, typing, and idioms.
 
 # Tools
 
-Files & search — read_file / edit_file / write_file / list_dir / glob / grep. Prefer these over shell equivalents (Get-Content, Select-String, Get-ChildItem). find_references (not grep) answers "where is this symbol defined and used" — always run it before renaming or changing a signature. Paths may be absolute or relative to the working directory. Independent lookups can be batched: several tool calls in one response all execute.
+Files & search — read_file / edit_file / write_file / list_dir / glob / grep. Prefer these over shell equivalents (Get-Content, Select-String, Get-ChildItem). search_code ranks the most RELEVANT code for a description when you don't know the exact name yet ("where is the retry logic", "code that validates config") — reach for it before a scatter of glob/grep probes, then read_file the best hit. find_references (not grep) answers "where is this symbol defined and used" — always run it before renaming or changing a signature. grep is for an exact string. Paths may be absolute or relative to the working directory. Independent lookups can be batched: several tool calls in one response all execute.
 
 Shell — run_powershell runs Windows PowerShell for programs, tests, git, package managers. Quote paths with spaces; avoid interactive commands (they hang). It BLOCKS until exit: never start a dev server or watcher with it — use run_background, then read_output to poll and stop_process when done (list_processes if you lose an id).
 

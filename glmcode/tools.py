@@ -614,6 +614,33 @@ def _looks_like_definition(line: str, symbol_re: str, flags: int = 0) -> bool:
     return any(re.match(p.format(s=symbol_re), stripped, flags) for p in _DEFINITION_PATTERNS)
 
 
+def search_code(query: str, k: int = 6) -> str:
+    """Retrieve the most relevant code for a natural-language or keyword query
+    from the local codebase index (offline TF-IDF over identifier-aware tokens).
+    Use it to LOCATE the right place to read before diving in -- 'where is the
+    retry/backoff logic', 'the code that parses config' -- instead of guessing
+    or running several glob/grep probes."""
+    from .codebase_memory import search_codebase
+    query = (query or "").strip()
+    if not query:
+        raise ToolErrorBase("search_code needs a 'query'", ErrorSeverity.ERROR)
+    k = max(1, min(int(k or 6), 12))
+    try:
+        hits = search_codebase(get_workdir(), query, k=k)
+    except Exception as e:
+        raise ToolErrorBase(f"codebase search failed: {e}", ErrorSeverity.ERROR)
+    if not hits:
+        return f"No matches for {query!r} in the indexed project files."
+    parts = [f"Top {len(hits)} matches for {query!r} (most relevant first). "
+             f"Open a file with read_file to see full context:"]
+    for h in hits:
+        snippet = h["text"]
+        if len(snippet) > 700:
+            snippet = snippet[:700] + "\n…"
+        parts.append(f"\n{h['path']}:{h['start']}-{h['end']}  (relevance {h['score']})\n{snippet}")
+    return _truncate("\n".join(parts))
+
+
 def find_references(symbol: str, path: str = ".", glob: str = "",
                     case_sensitive: bool = True, max_results: int = 200) -> str:
     """Find every occurrence of an exact identifier across the codebase,
@@ -1690,6 +1717,20 @@ TOOL_SCHEMAS = [
         ["symbol"],
     ),
     _schema(
+        "search_code",
+        "Semantic-ish retrieval over the project: rank the most RELEVANT code chunks for a "
+        "natural-language or keyword query using a local offline index (no network). Use it to "
+        "find WHERE to look when you don't know the exact symbol or filename -- e.g. 'where is "
+        "the retry/backoff logic', 'code that validates the config', 'how are sessions saved'. "
+        "It returns ranked file:line snippets; open the best hit with read_file. Prefer "
+        "find_references when you know the exact identifier, and grep for an exact string.",
+        {
+            "query": {"type": "string", "description": "What you're looking for, in words or keywords"},
+            "k": {"type": "integer", "description": "How many results to return (default 6, max 12)"},
+        },
+        ["query"],
+    ),
+    _schema(
         "run_powershell",
         "Run a Windows PowerShell command and return stdout/stderr/exit code. Use for running "
         "programs, tests, git, package managers. NOT for reading/searching files (use the file "
@@ -2271,7 +2312,7 @@ CONVERSATIONAL_SCHEMAS = [
 # for). All of these are in READONLY_TOOLS, so they run without a permission
 # prompt, which matters for a hands-free delegator.
 _CONVO_READONLY_NAMES = ("read_file", "list_dir", "glob", "grep",
-                         "find_references", "review_changes")
+                         "find_references", "search_code", "review_changes")
 CONVERSATIONAL_READONLY_SCHEMAS = [
     s for s in TOOL_SCHEMAS if s["function"]["name"] in _CONVO_READONLY_NAMES
 ]
@@ -2304,6 +2345,7 @@ TOOL_FUNCTIONS = {
     "glob": glob_files,
     "grep": grep,
     "find_references": find_references,
+    "search_code": search_code,
     "run_powershell": run_powershell,
     "run_background": run_background,
     "read_output": read_output,
@@ -2340,9 +2382,9 @@ TOOL_FUNCTIONS = {
 # to a single small file outside any project, so a diff-preview permission
 # prompt would just be friction, not a meaningful safety check.
 READONLY_TOOLS = {"read_file", "list_dir", "glob", "grep", "find_references",
-                 "todo_write", "remember", "show_image", "compact_context",
-                 "read_output", "stop_process", "list_processes",
-                 "review_changes"}
+                 "search_code", "todo_write", "remember", "show_image",
+                 "compact_context", "read_output", "stop_process",
+                 "list_processes", "review_changes"}
 # Tools that modify files (auto-approved in autoedit mode).
 FILE_WRITE_TOOLS = {"write_file", "edit_file", "git_commit"}
 # Network read tools (prompt in ask mode, auto-approved in autoedit/yolo).
