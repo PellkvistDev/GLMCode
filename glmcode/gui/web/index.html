@@ -700,6 +700,19 @@
             <button id="gh-sync" class="btn btn-primary">Sync</button>
           </div>
         </div>
+        <div class="row"><div class="row-text"><label>Pull requests</label>
+          <span class="row-sub">Review an open PR (reads the files, runs diagnostics), or address its
+            review comments in a checkout of its branch.</span></div>
+          <div class="row-actions"><button id="gh-pr-load" class="btn btn-ghost">Load open PRs</button></div>
+        </div>
+        <div id="gh-pr-list" class="provider-list" hidden></div>
+        <div class="row"><div class="row-text">
+          <div class="task-folder-row" style="margin:0">
+            <input id="gh-pr-number" class="text-input mini" type="number" placeholder="PR #">
+            <button id="gh-pr-review" class="btn btn-primary">Review</button>
+            <button id="gh-pr-address" class="btn btn-ghost">Address comments</button>
+          </div></div>
+        </div>
         <div class="row"><div class="row-text"><label>Disconnect</label>
           <span class="row-sub">Stops syncing this folder. Your files stay; nothing is deleted.</span></div>
           <div class="row-actions"><button id="gh-repo-disconnect" class="btn btn-danger-ghost">Disconnect repo</button></div>

@@ -506,6 +506,97 @@ def list_repos(token: str, limit: int = 100) -> list[dict]:
     return out[:limit]
 
 
+def _api_text(method: str, path: str, token: str, accept: str) -> str:
+    """Like _api but returns the raw body as text (for the .diff media type)."""
+    req = urllib.request.Request(_API + path, method=method)
+    req.add_header("Authorization", f"Bearer {token}")
+    req.add_header("Accept", accept)
+    req.add_header("X-GitHub-Api-Version", "2022-11-28")
+    req.add_header("User-Agent", "make-no-mistakes")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.read().decode("utf-8", errors="replace")
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            raise GitHubError("GitHub rejected the token for this pull request.")
+        if e.code == 404:
+            raise GitHubError("Pull request not found (or the token can't see it).")
+        raise GitHubError(f"GitHub API error {e.code}.")
+    except urllib.error.URLError as e:
+        raise GitHubError(f"Could not reach GitHub: {e.reason}")
+
+
+def list_open_pulls(token: str, owner: str, repo: str, limit: int = 30) -> list[dict]:
+    rows = _api("GET", f"/repos/{owner}/{repo}/pulls?state=open&per_page={min(limit, 50)}", token)
+    out = []
+    for r in (rows if isinstance(rows, list) else []):
+        out.append({
+            "number": r.get("number"),
+            "title": r.get("title", ""),
+            "author": (r.get("user") or {}).get("login", ""),
+            "head": (r.get("head") or {}).get("ref", ""),
+            "base": (r.get("base") or {}).get("ref", ""),
+            "draft": bool(r.get("draft")),
+        })
+    return out
+
+
+def get_pull(token: str, owner: str, repo: str, number: int) -> dict:
+    r = _api("GET", f"/repos/{owner}/{repo}/pulls/{int(number)}", token)
+    return {
+        "number": r.get("number"),
+        "title": r.get("title", ""),
+        "body": r.get("body") or "",
+        "author": (r.get("user") or {}).get("login", ""),
+        "head": (r.get("head") or {}).get("ref", ""),
+        "base": (r.get("base") or {}).get("ref", ""),
+        "state": r.get("state", ""),
+        "url": r.get("html_url", ""),
+    }
+
+
+def pull_diff(token: str, owner: str, repo: str, number: int, max_chars: int = 24000) -> str:
+    diff = _api_text("GET", f"/repos/{owner}/{repo}/pulls/{int(number)}", token,
+                     accept="application/vnd.github.v3.diff")
+    if len(diff) > max_chars:
+        diff = diff[:max_chars] + f"\n... [diff truncated at {max_chars} chars]"
+    return diff
+
+
+def pull_review_comments(token: str, owner: str, repo: str, number: int) -> list[dict]:
+    """Inline code-review comments (path + line + body) plus top-level PR
+    comments, so 'address the review' sees everything a reviewer said."""
+    out: list[dict] = []
+    inline = _api("GET", f"/repos/{owner}/{repo}/pulls/{int(number)}/comments?per_page=100", token)
+    for c in (inline if isinstance(inline, list) else []):
+        out.append({"path": c.get("path", ""), "line": c.get("line") or c.get("original_line"),
+                    "author": (c.get("user") or {}).get("login", ""),
+                    "body": c.get("body", "")})
+    issue = _api("GET", f"/repos/{owner}/{repo}/issues/{int(number)}/comments?per_page=100", token)
+    for c in (issue if isinstance(issue, list) else []):
+        out.append({"path": "", "line": None,
+                    "author": (c.get("user") or {}).get("login", ""),
+                    "body": c.get("body", "")})
+    return out
+
+
+def post_issue_comment(token: str, owner: str, repo: str, number: int, body: str) -> str:
+    r = _api("POST", f"/repos/{owner}/{repo}/issues/{int(number)}/comments", token,
+             {"body": body})
+    return r.get("html_url", "")
+
+
+def fetch_pr_branch(path: Path, token: str | None, number: int, head_ref: str = "") -> str:
+    """Check out a PR's head locally so the agent can work on it and push back.
+    Uses the pull/N/head ref (works even for forks). Returns the local branch."""
+    p = Path(path)
+    branch = head_ref or f"pr-{int(number)}"
+    _git_ok(["fetch", "origin", f"pull/{int(number)}/head:{branch}"], cwd=p, token=token,
+            what="Fetch PR branch")
+    _git_ok(["checkout", branch], cwd=p, what="Checkout PR branch")
+    return branch
+
+
 def create_repo(token: str, name: str, private: bool = True,
                 description: str = "") -> dict:
     """Create a new repo under the authenticated user; return its coords."""

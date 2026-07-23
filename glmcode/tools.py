@@ -699,6 +699,32 @@ def go_to_definition(path: str, line: int, character: int) -> str:
                                        for loc in locs)
 
 
+def post_pr_comment(number: int, body: str) -> str:
+    """Post a comment (e.g. a review) to a GitHub pull request in THIS project's
+    connected repo. Used after reviewing a PR, only when the user asks to post."""
+    from . import githubsync as gh
+    body = (body or "").strip()
+    if not body:
+        raise ToolErrorBase("post_pr_comment needs a non-empty 'body'", ErrorSeverity.ERROR)
+    st = gh.status(get_workdir())
+    if not st.remote_url:
+        raise ToolErrorBase("this folder isn't connected to a GitHub repository",
+                            ErrorSeverity.ERROR)
+    try:
+        host, owner, repo = gh.parse_repo(st.remote_url)
+    except gh.GitHubError as e:
+        raise ToolErrorBase(str(e), ErrorSeverity.ERROR)
+    token = gh.load_token(host)
+    if not token:
+        raise ToolErrorBase("no GitHub token is configured (connect one in Settings → GitHub)",
+                            ErrorSeverity.ERROR)
+    try:
+        url = gh.post_issue_comment(token, owner, repo, int(number), body)
+    except gh.GitHubError as e:
+        raise ToolErrorBase(str(e), ErrorSeverity.ERROR)
+    return f"Posted the comment to PR #{number}: {url}"
+
+
 def find_references(symbol: str, path: str = ".", glob: str = "",
                     case_sensitive: bool = True, max_results: int = 200) -> str:
     """Find every occurrence of an exact identifier across the codebase,
@@ -1811,6 +1837,17 @@ TOOL_SCHEMAS = [
         ["path", "line", "character"],
     ),
     _schema(
+        "post_pr_comment",
+        "Post a comment (typically your review) to a GitHub pull request in this project's "
+        "connected repo. Only use it when the user asks you to post — otherwise just show the "
+        "review in the chat.",
+        {
+            "number": {"type": "integer", "description": "The pull request number"},
+            "body": {"type": "string", "description": "The comment/review body (Markdown)"},
+        },
+        ["number", "body"],
+    ),
+    _schema(
         "run_powershell",
         "Run a Windows PowerShell command and return stdout/stderr/exit code. Use for running "
         "programs, tests, git, package managers. NOT for reading/searching files (use the file "
@@ -2443,6 +2480,7 @@ TOOL_FUNCTIONS = {
     "search_code": search_code,
     "code_diagnostics": code_diagnostics,
     "go_to_definition": go_to_definition,
+    "post_pr_comment": post_pr_comment,
     "run_powershell": run_powershell,
     "run_background": run_background,
     "read_output": read_output,
@@ -2490,7 +2528,8 @@ FILE_WRITE_TOOLS = {"write_file", "edit_file", "git_commit"}
 # same way even though it "just reads" a local file. package_info/
 # show_http_cat are outbound requests to third-party APIs, same tier as
 # fetch_url.
-NETWORK_TOOLS = {"fetch_url", "web_search", "view_image", "package_info", "show_http_cat"}
+NETWORK_TOOLS = {"fetch_url", "web_search", "view_image", "package_info",
+                 "show_http_cat", "post_pr_comment"}
 # Git tools (prompt in ask mode, auto-approved in autoedit/yolo).
 GIT_TOOLS = {"git_push", "git_pull", "git_branch_list"}
 # Local image generation: creates a new file, and the first call installs

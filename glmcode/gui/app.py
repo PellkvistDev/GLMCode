@@ -1675,6 +1675,86 @@ class Api:
             return {"error": str(e)}
         return {"ok": True, "github": self.github_status()}
 
+    # -- PR review -------------------------------------------------------- #
+
+    def _active_repo_coords(self):
+        cs = self._active
+        if cs is None:
+            return None
+        try:
+            st = githubsync.status(Path(cs.agent.workdir))
+            if not st.remote_url:
+                return None
+            host, owner, repo = githubsync.parse_repo(st.remote_url)
+            return host, owner, repo, Path(cs.agent.workdir)
+        except Exception:
+            return None
+
+    @staticmethod
+    def _format_pr_comments(comments) -> str:
+        lines = []
+        for c in comments:
+            loc = f"{c['path']}:{c['line']}" if c.get("path") else "(general)"
+            body = (c.get("body") or "").strip()[:600]
+            lines.append(f"- [{loc}] {c.get('author', '')}: {body}")
+        return "\n".join(lines)
+
+    def github_open_pulls(self):
+        coords = self._active_repo_coords()
+        if coords is None:
+            return {"error": "This chat isn't a connected GitHub repository."}
+        token = self._gh_token()
+        if not token:
+            return {"error": "Connect a GitHub token first."}
+        _, owner, repo, _ = coords
+        try:
+            return {"pulls": githubsync.list_open_pulls(token, owner, repo)}
+        except githubsync.GitHubError as e:
+            return {"error": str(e)}
+
+    def github_review_pr(self, number):
+        coords = self._active_repo_coords()
+        if coords is None:
+            return {"error": "This chat isn't a connected GitHub repository."}
+        token = self._gh_token()
+        if not token:
+            return {"error": "Connect a GitHub token first."}
+        _, owner, repo, _ = coords
+        try:
+            pr = githubsync.get_pull(token, owner, repo, int(number))
+            diff = githubsync.pull_diff(token, owner, repo, int(number))
+            comments = githubsync.pull_review_comments(token, owner, repo, int(number))
+        except (githubsync.GitHubError, ValueError) as e:
+            return {"error": str(e)}
+        from ..prompts import PR_REVIEW_TASK
+        task = PR_REVIEW_TASK.format(
+            number=pr["number"], title=pr["title"], author=pr["author"],
+            head=pr["head"], base=pr["base"], body=(pr["body"] or "(no description)")[:2000],
+            comments=self._format_pr_comments(comments) or "(none yet)", diff=diff)
+        self.send(task)
+        return {"ok": True}
+
+    def github_address_pr(self, number):
+        coords = self._active_repo_coords()
+        if coords is None:
+            return {"error": "This chat isn't a connected GitHub repository."}
+        token = self._gh_token()
+        if not token:
+            return {"error": "Connect a GitHub token first."}
+        _, owner, repo, workdir = coords
+        try:
+            pr = githubsync.get_pull(token, owner, repo, int(number))
+            githubsync.fetch_pr_branch(workdir, token, int(number), pr.get("head", ""))
+            comments = githubsync.pull_review_comments(token, owner, repo, int(number))
+        except (githubsync.GitHubError, ValueError) as e:
+            return {"error": str(e)}
+        from ..prompts import PR_ADDRESS_TASK
+        task = PR_ADDRESS_TASK.format(
+            number=pr["number"], title=pr["title"],
+            comments=self._format_pr_comments(comments) or "(no review comments found)")
+        self.send(task)
+        return {"ok": True, "github": self.github_status()}
+
     def _maybe_autopull(self, workdir: Path) -> None:
         """Background best-effort pull when opening a connected session. Skips a
         dirty tree (never touches uncommitted local work automatically)."""

@@ -352,6 +352,9 @@ class PermissionEngine:
                     detail += f"\nFocus: {args['question']}"
             elif name == "package_info":
                 detail = f"Look up {args.get('ecosystem', '?')} package: {args.get('name', '?')}"
+            elif name == "post_pr_comment":
+                detail = (f"Post a comment to pull request #{args.get('number', '?')} on GitHub:\n\n"
+                          f"{str(args.get('body', ''))[:500]}")
             elif name == "show_http_cat":
                 detail = f"Show http.cat image for status {args.get('status_code', '?')}"
             else:

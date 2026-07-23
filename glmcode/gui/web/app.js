@@ -3696,6 +3696,33 @@ $("gh-repo-disconnect").addEventListener("click", async () => {
 });
 $("gh-open-remote").addEventListener("click", () => { if (ghRemoteUrl) api().open_external(ghRemoteUrl); });
 
+$("gh-pr-load").addEventListener("click", async () => {
+  const res = await ghAction($("gh-pr-load"), () => api().github_open_pulls(), false);
+  if (!res) return;
+  const list = $("gh-pr-list");
+  list.hidden = false;
+  list.innerHTML = "";
+  for (const pr of res.pulls || []) {
+    const row = document.createElement("button");
+    row.className = "gh-repo-row";
+    row.innerHTML = `<span class="gh-repo-name">#${pr.number} ${esc(pr.title)}</span>` +
+      `<span class="gh-repo-tag">${esc(pr.author)}${pr.draft ? " · draft" : ""}</span>`;
+    row.addEventListener("click", () => { $("gh-pr-number").value = pr.number; });
+    list.appendChild(row);
+  }
+  if (!list.children.length) list.innerHTML = '<div class="row-sub">No open pull requests.</div>';
+});
+async function ghPrAction(btn, fn) {
+  const n = parseInt($("gh-pr-number").value, 10);
+  if (!n) { toast("Enter a PR number (or load and pick one).", "error", 3000); return; }
+  const res = await ghAction(btn, () => fn(n));
+  if (res && res.ok) { $("settings-backdrop").hidden = true; }
+}
+$("gh-pr-review").addEventListener("click", () =>
+  ghPrAction($("gh-pr-review"), (n) => api().github_review_pr(n)));
+$("gh-pr-address").addEventListener("click", () =>
+  ghPrAction($("gh-pr-address"), (n) => api().github_address_pr(n)));
+
 $("gh-foot-pull").addEventListener("click", async () => {
   if (await ghAction($("gh-foot-pull"), () => api().github_pull())) refreshGithubRepo();
 });

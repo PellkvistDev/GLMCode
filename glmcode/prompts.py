@@ -446,6 +446,29 @@ def detect_check_command(cwd: Path | None = None) -> str:
     return ""
 
 
+PR_REVIEW_TASK = (
+    "Review GitHub pull request #{number}: “{title}” (by {author}, {head} → {base}).\n\n"
+    "Review it as a demanding senior engineer would: read the ACTUAL changed files in this "
+    "checkout (don't judge from the diff alone), run code_diagnostics on files you're unsure "
+    "about, and look hard for bugs, unhandled edge cases, security issues, missed requirements, "
+    "and missing/broken tests. Be specific — cite file:line. Then write a clear review: a short "
+    "summary verdict, then concrete findings ordered by importance, then any nits. If it's solid, "
+    "say so plainly. If the user asks you to post it, use post_pr_comment.\n\n"
+    "PR description:\n{body}\n\n"
+    "Existing review comments:\n{comments}\n\n"
+    "Diff:\n{diff}"
+)
+
+PR_ADDRESS_TASK = (
+    "Address the review comments on GitHub pull request #{number}: “{title}”. The PR branch is "
+    "checked out locally. Work through each comment below: make the change, verify it "
+    "(code_diagnostics / run the tests), and keep going until they're all handled or you hit one "
+    "you can't (say which and why). When done, summarise what you changed per comment. Push with "
+    "the Sync button / git_push when the user's ready — don't force-push.\n\n"
+    "Review comments to address:\n{comments}"
+)
+
+
 ATTEMPT_TASK = (
     "{task}\n\n"
     "[You are attempt {k} of {n} independent attempts at this SAME task — each runs in "
