@@ -2738,15 +2738,7 @@ $("opt-wake").addEventListener("click", async () => {
   settings = await api().set_setting("voice_wake_enabled", next);
   $("opt-wake").setAttribute("aria-checked", String(next));
   $("wake-word-row").hidden = !next;
-  $("wake-gated-row").hidden = !next;
   refreshWake();
-});
-$("opt-wake-gated").addEventListener("click", async () => {
-  const next = $("opt-wake-gated").getAttribute("aria-checked") !== "true";
-  settings = await api().set_setting("voice_wake_gated", next);
-  $("opt-wake-gated").setAttribute("aria-checked", String(next));
-  // Apply to an open session immediately.
-  if (voice.active) { voice.gated = !!(settings.voice_wake_enabled && next); if (!voice.gated) voice.gateOpen = true; idleOrListen(); }
 });
 $("voice-wake-word").addEventListener("change", async () => {
   const v = $("voice-wake-word").value.trim() || "hey assistant";
@@ -3175,9 +3167,7 @@ function syncSettingsUI() {
   const wakeOn = !!settings.voice_wake_enabled;
   $("opt-wake").setAttribute("aria-checked", wakeOn);
   $("wake-word-row").hidden = !wakeOn;
-  $("wake-gated-row").hidden = !wakeOn;
   $("voice-wake-word").value = settings.voice_wake_word || "hey assistant";
-  $("opt-wake-gated").setAttribute("aria-checked", settings.voice_wake_gated !== false);
   applyModeChip();
   applyReadAloudChip();
 }
@@ -3186,7 +3176,7 @@ function shortPath(p) {
   return parts.length > 2 ? "…\\" + parts.slice(-2).join("\\") : p;
 }
 
-$("settings-btn").addEventListener("click", async () => {
+async function openSettings() {
   // Re-sync the toggles/segments to the CURRENT settings every time the sheet
   // opens. It's cheap and idempotent, and it makes the sheet correct no matter
   // what happened at boot -- the boot-time sync could silently not "stick" on
@@ -3206,7 +3196,8 @@ $("settings-btn").addEventListener("click", async () => {
     $("session-usage").textContent =
       `${fmtTokens(u.completion_tokens)} output · ${fmtTokens(u.prompt_tokens)} sent · context ~${fmtTokens(u.context)} · $0.00`;
   } catch (e) { /* usage line is non-critical */ }
-});
+}
+$("settings-btn").addEventListener("click", openSettings);
 
 /* Dedicated Browser Agent model: every configured provider's models, plus
    "Same as chat". Options carry [provider, model] as JSON in their value. */
@@ -3819,7 +3810,7 @@ function setVoiceOrb(state) {
 }
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function startVoice() {
+async function startVoice(viaWake = false) {
   if (voice.active) return;
   disarmWake();  // release the wake listener's mic before opening our own
   let res;
@@ -3854,11 +3845,13 @@ async function startVoice() {
   voice.sens = (settings && settings.voice_sensitivity) || 1.0;
   voice.pttKey = (settings && settings.voice_ptt_key) || "Space";
   voice.endpointMs = (settings && settings.voice_silence_ms) || 750;
-  // Wake-gated turns: only when the wake word is on AND gating is enabled. The
-  // session opens ready for your first request (you just summoned it / clicked);
-  // after each request it soft-mutes until it hears the wake word again.
-  voice.gated = !!(settings && settings.voice_wake_enabled && settings.voice_wake_gated);
+  // Wake-gated turns default by HOW you started: opening by wake word implies
+  // hands-free-in-a-room, so gating is ON (say the word before each request);
+  // opening by clicking the button implies you're at the machine, so it's OFF
+  // (continuous). Toggle it live from the voice screen either way.
+  voice.gated = !!viaWake;
   voice.gateOpen = true;
+  applyGateToggleUI();
   renderVoiceWorkers();
   $("voice-caption").textContent = "";
   $("voice-overlay").hidden = false;
@@ -4386,6 +4379,23 @@ function setVoicePtt(on) {
   }
 }
 
+function applyGateToggleUI() {
+  const t = $("voice-gate-toggle");
+  if (!t) return;
+  t.setAttribute("aria-checked", String(!!voice.gated));
+  t.classList.toggle("on", !!voice.gated);
+}
+function setVoiceGated(on) {
+  voice.gated = !!on;
+  if (!voice.gated) {
+    voice.gateOpen = true;            // continuous: always listening for a request
+  } else if (!voice.speaking && !voice.thinking && !voice.recording && !voice.perm) {
+    voice.gateOpen = false;           // soft-mute now; wake word needed for the next one
+  }                                    // (mid-turn: it re-gates after this request)
+  applyGateToggleUI();
+  if (voice.active) idleOrListen();
+}
+
 function pttPress() {
   if (!voice.active || !voice.ptt || voice.recording || voice.transcribing) return;
   if (voice.speaking || voice.thinking) interruptReply();
@@ -4618,7 +4628,7 @@ async function wakeFinish() {
   const m = text && wakeMatches(text);
   if (m) {
     disarmWake();
-    await startVoice();
+    await startVoice(true);  // opened via wake word -> gating ON by default
     // "hey assistant, add dark mode" -> open the session AND run that request
     // (in gated mode submitVoiceRequest re-mutes afterward).
     if (m.command && voice.active) submitVoiceRequest(m.command);
@@ -4655,10 +4665,12 @@ function refreshWake() {
   else disarmWake();
 }
 
-$("voice-chip").addEventListener("click", () => { if (voice.active) stopVoice(); else startVoice(); });
+$("voice-chip").addEventListener("click", () => { if (voice.active) stopVoice(); else startVoice(false); });
 $("voice-close").addEventListener("click", stopVoice);
 $("voice-mute").addEventListener("click", toggleMute);
 $("voice-replay").addEventListener("click", replayLastReply);
+$("voice-settings").addEventListener("click", openSettings);
+$("voice-gate-toggle").addEventListener("click", () => setVoiceGated(!voice.gated));
 $("voice-perm-yes").addEventListener("click", () => resolvePerm("y"));
 $("voice-perm-always").addEventListener("click", () => resolvePerm("a"));
 $("voice-perm-no").addEventListener("click", () => resolvePerm("n"));

@@ -1599,7 +1599,9 @@ body.sidebar-open #sidebar { transform: translateX(0); }
 #voice-mute.active { color: #ff453a; background: rgba(255, 69, 58, 0.14); }
 
 .voice-overlay {
-  position: fixed; inset: 0; z-index: 60;
+  /* Below the settings sheet (--z-sheet: 50) so Settings can open ON TOP of the
+     voice screen, but above the rest of the app. */
+  position: fixed; inset: 0; z-index: 45;
   display: flex; align-items: center; justify-content: center;
   background: rgba(0, 0, 0, 0.55);
 }
@@ -1609,9 +1611,11 @@ body.sidebar-open #sidebar { transform: translateX(0); }
 }
 .voice-head {
   width: 100%; display: flex; align-items: center; justify-content: space-between;
+  gap: 8px; flex-wrap: wrap;
 }
 .voice-head h2 { font-size: 18px; margin: 0; }
-.voice-head-actions { display: flex; align-items: center; gap: 8px; }
+.voice-head-actions { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+#voice-gate-toggle.on { color: var(--accent); background: var(--glass-hi); border-color: var(--accent); }
 
 .voice-orb {
   --amp: 0; width: 132px; height: 132px; border-radius: 50%;
