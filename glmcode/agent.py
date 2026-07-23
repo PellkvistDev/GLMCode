@@ -29,7 +29,8 @@ from .tools import (BROWSER_ACTION_TOOLS, BROWSER_AGENT_SCHEMAS,
                     CHECK_WORKERS_TOOL, COMPACT_CONTEXT_TOOL,
                     CONTROL_CHROME_TOOL, CONVERSATIONAL_READONLY_SCHEMAS,
                     CONVERSATIONAL_SCHEMAS,
-                    DISPATCH_WORKER_TOOL, GENERATE_IMAGE_TOOL, PREVIEW_PAGE_TOOL,
+                    CHECK_PAGE_TOOL, DISPATCH_WORKER_TOOL, GENERATE_IMAGE_TOOL,
+                    PREVIEW_PAGE_TOOL,
                     REMEMBER_TOOL, REVERT_WORKER_TOOL, REVIEW_CHANGES_TOOL,
                     SHOW_HTTP_CAT_TOOL, SHOW_IMAGE_TOOL, SPEAK_TOOL,
                     STEER_WORKER_TOOL, STOP_WORKER_TOOL, SUBAGENT_TOOL,
@@ -638,6 +639,42 @@ class Agent:
             "Screenshot captured and shown to the user. Call view_image on this path if "
             "you need a detailed description of what rendered."
         )
+
+    def _check_page_tool(self, url: str, wait_seconds: float = 2.5) -> str:
+        """Load a running page and report runtime console/JS errors + failed
+        requests alongside a screenshot, so the agent can fix what breaks when
+        the app actually runs."""
+        from .browser import capture_page
+        url = (url or "").strip()
+        if not url:
+            raise ToolError("check_page needs a 'url'")
+        slug = re.sub(r"[^a-z0-9]+", "-", url.lower()).strip("-")[:40].strip("-") or "page"
+        out_path = self.workdir / "generated" / f"runtime-{slug}-{uuid.uuid4().hex[:6]}.png"
+        with self.events.status(f"running {url} and watching for errors..."):
+            try:
+                r = capture_page(url, out_path, wait_seconds=wait_seconds, status=self.events.info)
+            except Exception as e:
+                raise ToolError(f"could not run the page: {e}")
+
+        if r.get("screenshot"):
+            self.events.show_image(r["screenshot"], caption=url)
+        lines = []
+        if r.get("load_error"):
+            lines.append(f"LOAD ERROR: {r['load_error']}")
+        for label, key in (("Uncaught JS errors", "page_errors"),
+                           ("Console errors/warnings", "console"),
+                           ("Failed network requests", "failed_requests")):
+            items = r.get(key) or []
+            if items:
+                lines.append(f"{label} ({len(items)}):")
+                lines.extend(f"  - {it}" for it in items)
+        clean = not lines
+        marker = self._asset_marker("image", Path(r["screenshot"]), url,
+                                    "Screenshot shown to the user.") if r.get("screenshot") else ""
+        if clean:
+            return f"{url} loaded with no console errors, JS exceptions, or failed requests. {marker}"
+        return (f"Runtime check of {url} found problems — fix them and check again:\n"
+                + "\n".join(lines) + f"\n\n{marker}")
 
     def _generate_image(self, prompt: str, path: str = "", steps: int = 1) -> str:
         """Generate an image locally with sd-turbo and show it to the user."""
@@ -1415,6 +1452,8 @@ class Agent:
                     output = self._show_http_cat_tool(args.get("status_code", 0))
                 elif name == PREVIEW_PAGE_TOOL:
                     output = self._preview_page_tool(args.get("url", ""), args.get("wait_seconds", 2.0))
+                elif name == CHECK_PAGE_TOOL:
+                    output = self._check_page_tool(args.get("url", ""), args.get("wait_seconds", 2.5))
                 elif name == COMPACT_CONTEXT_TOOL:
                     output = self._compact_context_tool(args.get("reason", ""), assistant_idx)
                 elif name == SPEAK_TOOL:

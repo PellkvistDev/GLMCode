@@ -1946,6 +1946,20 @@ TOOL_SCHEMAS = [
         },
         ["url"],
     ),
+    _schema(
+        "check_page",
+        "Load a running web page (usually your run_background dev server) in a real headless "
+        "browser and report what happens AT RUNTIME: JavaScript console errors/warnings, uncaught "
+        "exceptions, and failed network requests — plus a screenshot. Use it after a UI/web change "
+        "to catch what actually breaks when the app runs, not just what compiles. If it reports "
+        "errors, fix them and check again. First call installs Chromium (~150-300MB, one-time).",
+        {
+            "url": {"type": "string", "description": "URL to load, e.g. 'http://localhost:3000'"},
+            "wait_seconds": {"type": "number",
+                             "description": "Seconds to interact/settle after load (default 2.5, max 20)"},
+        },
+        ["url"],
+    ),
     # Git tools
     _schema(
         "git_status",
@@ -2415,6 +2429,7 @@ REMEMBER_TOOL = "remember"
 REVIEW_CHANGES_TOOL = "review_changes"
 SHOW_HTTP_CAT_TOOL = "show_http_cat"
 PREVIEW_PAGE_TOOL = "preview_page"
+CHECK_PAGE_TOOL = "check_page"
 
 
 TOOL_FUNCTIONS = {
@@ -2488,7 +2503,7 @@ TTS_TOOLS = {"speak"}
 # Local browser screenshots: same shape of concern as IMAGE_GEN_TOOLS/TTS_TOOLS
 # (new file, first-call install/download of Playwright + Chromium), plus it
 # also loads a URL like fetch_url does.
-BROWSER_TOOLS = {"preview_page"}
+BROWSER_TOOLS = {"preview_page", "check_page"}
 # control_chrome launches an interactive browser that can log in, submit forms
 # and act on the live web -- a bigger deal than a screenshot, so it prompts
 # once (in ask mode) to approve the whole session + goal. Same tier as a
