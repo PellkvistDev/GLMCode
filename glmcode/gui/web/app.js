@@ -3174,6 +3174,7 @@ function syncSettingsUI() {
   });
   applyThinkChip();
   $("opt-reasoning").setAttribute("aria-checked", !!settings.show_reasoning);
+  $("opt-verify").setAttribute("aria-checked", settings.verify_edits !== false);
   $("opt-notify").setAttribute("aria-checked", !!settings.notifications);
   $("opt-reduce-fx").setAttribute("aria-checked", !!settings.reduce_effects);
   $("opt-browser-headless").setAttribute("aria-checked", !!settings.browser_headless);
@@ -3315,6 +3316,7 @@ function bindSwitch(id, key) {
   });
 }
 bindSwitch("opt-reasoning", "show_reasoning");
+bindSwitch("opt-verify", "verify_edits");
 bindSwitch("opt-notify", "notifications");
 bindSwitch("opt-reduce-fx", "reduce_effects");
 bindSwitch("opt-browser-headless", "browser_headless");

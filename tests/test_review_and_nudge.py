@@ -180,6 +180,22 @@ def test_edit_without_verification_gets_one_nudge(scripted_agent, tmp_path, monk
     assert any("verify" in msg for lvl, msg in events.notices if lvl == "info")
 
 
+def test_no_nudge_when_verify_edits_disabled(scripted_agent, tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+
+    def script(n):
+        if n == 1:
+            args = json.dumps({"path": str(tmp_path / "f.py"), "content": "x = 1\n"})
+            return FakeResult([tool_call("c1", "write_file", args)])
+        return FakeResult(content="done (no verification, and that's fine)")
+
+    agent = _yolo(scripted_agent(script))
+    agent.cfg.verify_edits = False   # user just wants edits, no auto-run
+    agent.run_turn({"role": "user", "content": "make the file"})
+    assert not any(m.get("content") == VERIFY_NUDGE for m in agent.messages)
+    assert agent.client.n == 2       # edit round + final answer, no nudge round
+
+
 def test_no_nudge_when_turn_verified(scripted_agent, tmp_path, monkeypatch):
     monkeypatch.chdir(tmp_path)
 

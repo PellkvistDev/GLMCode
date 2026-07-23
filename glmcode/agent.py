@@ -936,8 +936,8 @@ class Agent:
                 # that edited files but never ran ANYTHING has skipped the
                 # "Verify" step entirely -- ask once, then accept whatever
                 # the model decides (it may legitimately decline).
-                if (self._turn_wrote_files and not self._turn_verified
-                        and not self._verify_nudged):
+                if (self.cfg.verify_edits and self._turn_wrote_files
+                        and not self._turn_verified and not self._verify_nudged):
                     self._verify_nudged = True
                     self.events.info("files were edited but nothing was run -- "
                                      "asking the agent to verify its changes")
