@@ -123,6 +123,7 @@ class Config:
     thinking: bool = True            # GLM reasoning mode (derived from thinking_mode; kept for compat)
     thinking_mode: str = "medium"    # low | medium | high | max (effort/iteration level)
     verify_edits: bool = False       # nudge the agent to verify edits it never ran anything to check (off by default)
+    auto_fix_tests: bool = False     # "make it green": after an edit turn, run the project's tests and fix until they pass (opt-in, bounded)
     show_reasoning: bool = True      # print the model's reasoning (dimmed)
     vision_route: str = "describe"   # describe | direct
     context_limit_tokens: int = 155_000  # hard auto-compact fallback above this estimate

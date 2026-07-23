@@ -814,6 +814,37 @@ def run_powershell(command: str, timeout_seconds: int = 120) -> str:
     return _truncate("\n".join(parts))
 
 
+def run_check_command(command: str, timeout_seconds: int = 180) -> tuple[int, str]:
+    """Run a verification command in the working dir and return (exit_code,
+    combined stdout+stderr). Cross-platform: PowerShell on Windows, /bin/sh
+    elsewhere. Used by the 'make it green' loop to run the project's tests
+    deterministically (the model doesn't get to decide whether to run them)."""
+    timeout_seconds = max(1, min(int(timeout_seconds), 600))
+    if os.name == "nt":
+        argv = ["powershell", "-NoProfile", "-NonInteractive", "-ExecutionPolicy",
+                "Bypass", "-Command", "$ErrorActionPreference='Continue'; " + command]
+    else:
+        argv = ["/bin/sh", "-c", command]
+    try:
+        proc = subprocess.Popen(
+            argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+            cwd=str(get_workdir()), **NO_WINDOW_KWARGS,
+        )
+    except OSError as e:
+        return (127, f"Failed to start command: {e}")
+    try:
+        out_b, _ = proc.communicate(timeout=timeout_seconds)
+    except subprocess.TimeoutExpired:
+        _terminate_process_tree(proc)
+        try:
+            out_b, _ = proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            out_b = b""
+        text = (out_b or b"").decode("utf-8", errors="replace")
+        return (124, _truncate(text + f"\n[timed out after {timeout_seconds}s]"))
+    return (proc.returncode, _truncate((out_b or b"").decode("utf-8", errors="replace")))
+
+
 # --------------------------------------------------------------------- #
 # run_background / read_output / stop_process / list_processes
 #

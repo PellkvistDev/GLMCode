@@ -19,11 +19,12 @@ from .events import AgentEvents
 from .permissions import PermissionEngine
 from .prompts import (BROWSER_AGENT_SYSTEM, BROWSER_RESUME_NOTE, COMPACT_PROMPT,
                       CONTINUE_NUDGE, CONVERSATIONAL_SYSTEM, FRESH_CRITIC_SYSTEM,
-                      REFINE_NUDGE, STEER_NUDGE_TEMPLATE, STEP_LIMIT_NUDGE,
-                      SUBAGENT_PREAMBLE, VIEW_IMAGE_PROMPT, VISION_ANALYSIS_PROMPT,
-                      WRAP_UP_NUDGE, blind_critique_prompt, build_system_prompt,
-                      conversational_project_context, fresh_review_nudge,
-                      is_critic_approval, verify_nudge)
+                      GREEN_GIVEUP_NUDGE, GREEN_NUDGE, REFINE_NUDGE,
+                      STEER_NUDGE_TEMPLATE, STEP_LIMIT_NUDGE, SUBAGENT_PREAMBLE,
+                      VIEW_IMAGE_PROMPT, VISION_ANALYSIS_PROMPT, WRAP_UP_NUDGE,
+                      blind_critique_prompt, build_system_prompt,
+                      conversational_project_context, detect_check_command,
+                      fresh_review_nudge, is_critic_approval, verify_nudge)
 from .tools import (BROWSER_ACTION_TOOLS, BROWSER_AGENT_SCHEMAS,
                     CHECK_WORKERS_TOOL, COMPACT_CONTEXT_TOOL,
                     CONTROL_CHROME_TOOL, CONVERSATIONAL_READONLY_SCHEMAS,
@@ -45,6 +46,9 @@ EDIT_TOOLS = {"write_file", "edit_file"}
 MAX_SUBAGENTS = 6
 # Safety cap on auto-continue-on-truncation rounds (see _call_model_until_done).
 MAX_CONTINUATIONS = 3
+# "Make it green": how many times the bounded test-fix loop will re-run the
+# project's checks and feed a failure back before giving up and reporting.
+GREEN_LOOP_MAX_ROUNDS = 4
 
 
 def _first_line(text: str, limit: int = 280) -> str:
@@ -901,6 +905,9 @@ class Agent:
         # The user's request this turn, kept for the fresh-eyes reviewer (which
         # judges the diff against the task in a clean, reasoning-free context).
         self._turn_task = _msg_text(user_message)
+        # "Make it green" bookkeeping, reset each turn (see _green_step).
+        self._green_rounds = 0
+        self._green_done = False
         # High/Max thinking modes: after the main answer, run self-review passes
         # that re-examine the work and fix issues. Only the main chat agent
         # refines -- sub-agents, workers and the voice delegator do not (it would
@@ -940,6 +947,16 @@ class Agent:
             self._log_assistant_msg(msg)
 
             if not result.tool_calls:
+                # "Make it green" (opt-in): after an edit turn, actually RUN the
+                # project's checks and, if they fail, feed the failure back and
+                # keep fixing -- bounded, and only when there's something to run.
+                # Deliberately gated so it never fires on a small/no-test/passing
+                # task: enabled + this is the main agent + files were edited.
+                if (self.cfg.auto_fix_tests and self.allow_subagents
+                        and not self.conversational and self._turn_wrote_files
+                        and not self._green_done):
+                    if self._green_step():
+                        continue
                 # One automatic push before accepting a final answer: a turn
                 # that edited files but never ran ANYTHING has skipped the
                 # "Verify" step entirely -- ask once, then accept whatever
@@ -1026,6 +1043,51 @@ class Agent:
             pass  # best-effort wrap-up either way
         finally:
             self.events.stream_end()
+
+    # -- "make it green": bounded test-fix loop --------------------------- #
+
+    def _run_check(self, cmd: str) -> tuple[bool, str]:
+        """Run the project's check command in this chat's workdir and return
+        (passed, output). Isolated for testing (monkeypatched in unit tests)."""
+        from .tools import run_check_command
+        code, output = run_check_command(cmd)
+        return code == 0, output
+
+    def _green_step(self) -> bool:
+        """One iteration of the make-it-green loop. Runs the detected check
+        command; returns True if it injected a fix nudge and the turn loop should
+        continue, False when there's nothing to run or the tests already pass.
+        A real run here also counts as verification (so the verify-nudge, if
+        enabled, won't also fire)."""
+        cmd = detect_check_command(self.workdir)
+        if not cmd:
+            self._green_done = True   # nothing detectable to run -- don't retry
+            return False
+        self.events.info(f"running the project's tests ({cmd})…")
+        try:
+            passed, output = self._run_check(cmd)
+        except Exception as e:
+            self._green_done = True
+            self.events.warn(f"couldn't run the tests: {e}")
+            return False
+        self._turn_verified = True
+        if passed:
+            self._green_done = True
+            self.events.info("tests pass.")
+            return False
+        if self._green_rounds >= GREEN_LOOP_MAX_ROUNDS:
+            self._green_done = True
+            self.events.warn(f"tests still failing after {GREEN_LOOP_MAX_ROUNDS} "
+                             "fix attempts — stopping and reporting.")
+            self.messages.append({"role": "user",
+                                  "content": GREEN_GIVEUP_NUDGE.format(cmd=cmd, output=output)})
+            return True
+        self._green_rounds += 1
+        self.events.warn(f"tests failing — fixing (attempt {self._green_rounds}/"
+                         f"{GREEN_LOOP_MAX_ROUNDS})…")
+        self.messages.append({"role": "user",
+                              "content": GREEN_NUDGE.format(cmd=cmd, output=output)})
+        return True
 
     # -- fresh-eyes review (High/Max) ------------------------------------- #
 

@@ -884,6 +884,7 @@ class Api:
             "mode": c.mode, "model": c.model, "vision_model": c.vision_model,
             "vision_route": c.vision_route, "thinking": c.thinking,
             "thinking_mode": c.thinking_mode, "verify_edits": c.verify_edits,
+            "auto_fix_tests": c.auto_fix_tests,
             "show_reasoning": c.show_reasoning, "temperature": c.temperature,
             "cwd": str(Path.cwd()) if self.session_id else "",
             "background_custom": bool(c.background_path),
@@ -920,7 +921,7 @@ class Api:
             c.thinking = value != "low"  # keep the derived flag consistent
         elif key in ("thinking", "show_reasoning", "read_aloud", "notifications",
                      "reduce_effects", "browser_headless", "browser_keep_logins",
-                     "verify_edits"):
+                     "verify_edits", "auto_fix_tests"):
             setattr(c, key, bool(value))
         elif key in ("model", "vision_model") and isinstance(value, str) and value.strip():
             setattr(c, key, value.strip())

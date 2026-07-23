@@ -444,6 +444,20 @@ def detect_check_command(cwd: Path | None = None) -> str:
     return ""
 
 
+GREEN_NUDGE = (
+    "[Automatic test run -- not from the user] I ran the project's checks (`{cmd}`) after your "
+    "edits and they FAILED — output below. Find the ROOT CAUSE and fix it. Do not edit the tests "
+    "to make them pass, delete them, or paper over the error. If a failure is clearly unrelated to "
+    "your change, say so in one line and fix only what you touched.\n\n{output}"
+)
+
+GREEN_GIVEUP_NUDGE = (
+    "[Automatic test run -- not from the user] After several attempts the checks (`{cmd}`) still "
+    "fail (last output below). Stop trying to fix them now. Report to the user plainly: what is "
+    "still failing, what you changed, and where you're stuck. Do NOT claim it works.\n\n{output}"
+)
+
+
 def verify_nudge(cwd: Path | None = None) -> str:
     """VERIFY_NUDGE made concrete with the project's likely check command, when
     one can be detected. Falls back to the generic nudge otherwise -- and the

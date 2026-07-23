@@ -21,8 +21,10 @@ from .prompts import (CONTINUE_NUDGE, EXECUTE_PLAN_MESSAGE, FILE_CONTEXT_MARKER,
 _INTERNAL_NUDGES = {CONTINUE_NUDGE, STEP_LIMIT_NUDGE, VERIFY_NUDGE,
                     REFINE_NUDGE, WRAP_UP_NUDGE}
 # Some of those carry variable content (a detected command, the reviewer's
-# findings), so exact-match isn't enough -- match their stable leading text too.
-_INTERNAL_NUDGE_PREFIXES = (VERIFY_NUDGE, REFINE_NUDGE, FRESH_REVIEW_HEADER)
+# findings, test output), so exact-match isn't enough -- match their stable
+# leading text too.
+_INTERNAL_NUDGE_PREFIXES = (VERIFY_NUDGE, REFINE_NUDGE, FRESH_REVIEW_HEADER,
+                            "[Automatic test run -- not from the user]")
 # STEER_NUDGE_TEMPLATE-wrapped messages ARE from the user -- shown as the
 # same "You steered" note the live view used, not as a framed wall of text.
 _STEER_PREFIX = STEER_NUDGE_TEMPLATE.split("{text}")[0]
