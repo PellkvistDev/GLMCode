@@ -52,6 +52,51 @@ def tokenize(text: str) -> list[str]:
     return out
 
 
+def _content_hash(text: str) -> str:
+    return hashlib.sha1(text.encode("utf-8", "replace")).hexdigest()[:16]
+
+
+class Embedder:
+    """Turns text into a normalized dense vector. Implementations: a real neural
+    sentence-embedding model (NeuralEmbedder) for synonym-level search, or a
+    deterministic fake for tests."""
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        raise NotImplementedError
+
+
+class NeuralEmbedder(Embedder):
+    """Local sentence-embedding model (all-MiniLM-L6-v2 by default), lazily
+    installed/downloaded like the TTS/STT models. Runs fully offline once set
+    up. Absent/unavailable -> the caller falls back to the lexical index."""
+
+    _model = None
+
+    def __init__(self, model_name: str = "sentence-transformers/all-MiniLM-L6-v2"):
+        self.model_name = model_name
+
+    @staticmethod
+    def packages_installed() -> bool:
+        import importlib.util
+        return importlib.util.find_spec("sentence_transformers") is not None
+
+    def _load(self):
+        if NeuralEmbedder._model is None:
+            from sentence_transformers import SentenceTransformer
+            NeuralEmbedder._model = SentenceTransformer(self.model_name)
+        return NeuralEmbedder._model
+
+    def embed(self, texts: list[str]) -> list[list[float]]:
+        model = self._load()
+        vecs = model.encode(texts, normalize_embeddings=True, show_progress_bar=False)
+        return [list(map(float, v)) for v in vecs]
+
+
+def _cosine(a: list[float], b: list[float]) -> float:
+    # vectors are stored normalized, so cosine is just the dot product
+    return sum(x * y for x, y in zip(a, b))
+
+
 def _file_sig(p: Path) -> list:
     try:
         st = p.stat()
@@ -102,9 +147,13 @@ def _chunk_text(text: str) -> list[dict]:
 class CodebaseIndex:
     """An incremental, persisted retrieval index for one project directory."""
 
-    def __init__(self, root: Path):
+    def __init__(self, root: Path, embedder: Embedder | None = None):
         self.root = Path(root).resolve()
         self._files: dict[str, dict] = {}   # rel_path -> {"sig":[..], "chunks":[..]}
+        self._embedder = embedder
+        # content-hash -> normalized vector, so re-embedding is incremental
+        # (only new/changed chunks are sent to the model). Persisted alongside.
+        self._vectors: dict[str, list[float]] = {}
         self._path = MEMORY_DIR / (self._key() + ".json")
         self._load()
 
@@ -116,6 +165,7 @@ class CodebaseIndex:
             data = json.loads(self._path.read_text(encoding="utf-8"))
             if isinstance(data, dict) and data.get("root") == str(self.root):
                 self._files = data.get("files", {})
+                self._vectors = data.get("vectors", {}) or {}
         except (OSError, ValueError):
             self._files = {}
 
@@ -123,8 +173,10 @@ class CodebaseIndex:
         try:
             MEMORY_DIR.mkdir(parents=True, exist_ok=True)
             tmp = self._path.with_suffix(".json.tmp")
-            tmp.write_text(json.dumps({"root": str(self.root), "files": self._files}),
-                           encoding="utf-8")
+            payload = {"root": str(self.root), "files": self._files}
+            if self._embedder is not None:
+                payload["vectors"] = self._vectors
+            tmp.write_text(json.dumps(payload), encoding="utf-8")
             tmp.replace(self._path)
         except OSError:
             pass
@@ -156,15 +208,62 @@ class CodebaseIndex:
         # Drop files that no longer exist.
         for gone in set(self._files) - seen:
             del self._files[gone]
+        if self._embedder is not None:
+            self._refresh_vectors()
         self._save()
         return reindexed
+
+    def _refresh_vectors(self) -> None:
+        """Embed any chunk whose content we haven't embedded yet, and drop
+        vectors for content that's no longer present. Only new/changed chunks
+        hit the model, so re-indexing stays cheap."""
+        wanted: dict[str, str] = {}     # hash -> text
+        for _, ch in self._corpus():
+            wanted[_content_hash(ch["text"])] = ch["text"]
+        missing = [h for h in wanted if h not in self._vectors]
+        if missing:
+            texts = [wanted[h] for h in missing]
+            try:
+                vecs = self._embedder.embed(texts)
+            except Exception:
+                return   # model unavailable -> leave cache; search falls back
+            for h, v in zip(missing, vecs):
+                self._vectors[h] = v
+        # prune vectors for content that's gone
+        for stale in set(self._vectors) - set(wanted):
+            del self._vectors[stale]
+
+    def _neural_search(self, query: str, k: int) -> list[dict]:
+        try:
+            qv = self._embedder.embed([query])[0]
+        except Exception:
+            return self._lexical_search(query, k)   # model failed -> fall back
+        results = []
+        for rel, ch in self._corpus():
+            v = self._vectors.get(_content_hash(ch["text"]))
+            if not v:
+                continue
+            score = _cosine(qv, v)
+            if score > 0:
+                results.append({"path": rel, "start": ch["start"], "end": ch["end"],
+                                "score": round(score, 4), "text": ch["text"]})
+        results.sort(key=lambda r: r["score"], reverse=True)
+        return results[:k]
 
     def _corpus(self) -> list[tuple[str, dict]]:
         return [(rel, ch) for rel, f in self._files.items() for ch in f["chunks"]]
 
     def search(self, query: str, k: int = 6) -> list[dict]:
         """Top-k chunks most relevant to `query`, each {path, start, end, score,
-        text}. TF-IDF cosine over identifier-aware tokens."""
+        text}. Neural cosine when an embedder is configured, else TF-IDF."""
+        if not (query or "").strip():
+            return []
+        if self._embedder is not None:
+            return self._neural_search(query, k)
+        return self._lexical_search(query, k)
+
+    def _lexical_search(self, query: str, k: int = 6) -> list[dict]:
+        """TF-IDF cosine over identifier-aware tokens (dependency-free default)."""
         q_tokens = tokenize(query)
         if not q_tokens:
             return []
@@ -200,22 +299,42 @@ class CodebaseIndex:
         return results[:k]
 
 
+# Opt-in neural retrieval. The GUI flips this from config; when on AND the model
+# package is installed, search uses embeddings, else it falls back to lexical.
+NEURAL_ENABLED = False
+
+
+def set_neural_enabled(enabled: bool) -> None:
+    global NEURAL_ENABLED
+    NEURAL_ENABLED = bool(enabled)
+
+
+def neural_embedder() -> Embedder | None:
+    if NEURAL_ENABLED and NeuralEmbedder.packages_installed():
+        return NeuralEmbedder()
+    return None
+
+
 # --- process-wide cache of indexes, refreshed at most every few seconds ------ #
 _indexes: dict[str, tuple[float, CodebaseIndex]] = {}
 _REFRESH_TTL = 5.0
 
 
-def get_index(root: Path) -> CodebaseIndex:
-    key = str(Path(root).resolve())
+def get_index(root: Path, embedder: Embedder | None = None) -> CodebaseIndex:
+    # Key by mode too, so flipping neural on/off doesn't reuse the wrong index.
+    key = f"{Path(root).resolve()}|{'n' if embedder is not None else 'l'}"
     now = time.time()
     hit = _indexes.get(key)
     if hit and now - hit[0] < _REFRESH_TTL:
         return hit[1]
-    idx = hit[1] if hit else CodebaseIndex(root)
+    idx = hit[1] if hit else CodebaseIndex(root, embedder=embedder)
     idx.refresh()
     _indexes[key] = (now, idx)
     return idx
 
 
-def search_codebase(root: Path, query: str, k: int = 6) -> list[dict]:
-    return get_index(root).search(query, k=k)
+def search_codebase(root: Path, query: str, k: int = 6,
+                    embedder: Embedder | None = "auto") -> list[dict]:
+    if embedder == "auto":
+        embedder = neural_embedder()
+    return get_index(root, embedder).search(query, k=k)

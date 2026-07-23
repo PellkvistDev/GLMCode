@@ -644,6 +644,11 @@
           verify (run tests / the affected code). Turn off if you'd rather it just edits without
           running commands.</span></div>
         <button id="opt-verify" class="switch" role="switch" aria-checked="false"><span></span></button></div>
+      <div class="row"><div class="row-text"><label for="opt-neural">Semantic code search</label>
+        <span class="row-sub">Make search_code match by meaning, not just keywords, using a local
+          embedding model. Turning it on downloads a small model (~90MB) once; until it's ready,
+          keyword search is used. Fully offline after setup.</span></div>
+        <button id="opt-neural" class="switch" role="switch" aria-checked="false"><span></span></button></div>
       <div class="row"><div class="row-text"><label for="opt-green">Make it green — auto-fix failing tests</label>
         <span class="row-sub">After a turn that edits files, run the project's tests; if they fail, keep
           fixing until they pass (up to a few tries) or report where it's stuck. Only runs when there

@@ -663,6 +663,9 @@ class Api:
         # a task (so there's no cost/behavior unless opted in).
         self._sched_stop = threading.Event()
         threading.Thread(target=self._scheduler_loop, daemon=True).start()
+        # Codebase memory: honor the neural-search setting from the start.
+        from .. import codebase_memory
+        codebase_memory.set_neural_enabled(self._cfg.codebase_memory_neural)
 
     # -- active-chat accessors ------------------------------------------- #
     # Most of this class predates parallel chats and talks about THE agent/
@@ -890,6 +893,7 @@ class Api:
             "vision_route": c.vision_route, "thinking": c.thinking,
             "thinking_mode": c.thinking_mode, "verify_edits": c.verify_edits,
             "auto_fix_tests": c.auto_fix_tests, "parallel_attempts": c.parallel_attempts,
+            "codebase_memory_neural": c.codebase_memory_neural,
             "show_reasoning": c.show_reasoning, "temperature": c.temperature,
             "cwd": str(Path.cwd()) if self.session_id else "",
             "background_custom": bool(c.background_path),
@@ -982,6 +986,12 @@ class Api:
                 c.temperature = min(1.5, max(0.0, float(value)))
             except (TypeError, ValueError):
                 pass
+        elif key == "codebase_memory_neural":
+            c.codebase_memory_neural = bool(value)
+            from .. import codebase_memory
+            codebase_memory.set_neural_enabled(c.codebase_memory_neural)
+            if c.codebase_memory_neural and not codebase_memory.NeuralEmbedder.packages_installed():
+                self._install_neural_memory()   # background; falls back to lexical until ready
         elif key == "parallel_attempts":
             try:
                 c.parallel_attempts = int(min(3, max(1, int(value))))
@@ -1853,6 +1863,31 @@ class Api:
             return {"cancelled": True}
         path = picked[0] if isinstance(picked, (list, tuple)) else picked
         return {"path": str(path)}
+
+    def _install_neural_memory(self) -> None:
+        """Background pip-install of the local embedding model package the first
+        time neural code search is turned on. Until it's ready, search_code just
+        uses the lexical index, so nothing breaks meanwhile."""
+        ev = self._events
+
+        def work():
+            import sys as _sys
+            from ..tools import NO_WINDOW_KWARGS
+            try:
+                ev.toast("Setting up semantic code search (one-time model download)…", "info")
+                proc = subprocess.run(
+                    [_sys.executable, "-m", "pip", "install", "--user", "--upgrade",
+                     "sentence-transformers"],
+                    capture_output=True, text=True, timeout=900, **NO_WINDOW_KWARGS)
+                from .. import codebase_memory
+                if proc.returncode == 0 and codebase_memory.NeuralEmbedder.packages_installed():
+                    ev.toast("Semantic code search is ready.", "info")
+                else:
+                    ev.toast("Couldn't install the embedding model; using keyword search "
+                             "instead. You can turn this off in Settings.", "warn")
+            except Exception:
+                ev.toast("Couldn't set up semantic code search; using keyword search.", "warn")
+        threading.Thread(target=work, daemon=True).start()
 
     def _scheduler_loop(self) -> None:
         from .. import scheduler as sched
