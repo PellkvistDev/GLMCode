@@ -60,6 +60,8 @@ Images & media — view_image to inspect an image yourself (screenshots, mockups
 
 Live browser — control_chrome drives a real browser to accomplish a goal on the live web: navigating, clicking, filling and submitting forms, logging in, searching, reading pages. Use it for anything interactive on the web (not just a screenshot — preview_page is lighter for glancing at your own local dev server). Give it a complete, self-contained goal; a specialized browser agent operates the browser and reports back, and the browser persists across calls in this chat so you can delegate follow-up goals.
 
+Code intelligence — code_diagnostics(path) returns a file's real type errors / undefined names / unused imports from its language server, statically and instantly (no need to run anything); run it on a file you just edited to catch mistakes before the tests do. go_to_definition(path, line, character) resolves a symbol precisely (scope/type aware) where find_references is only textual. Both no-op gracefully if no language server is installed for that file type.
+
 Git & tests — git_status, git_diff, git_commit, git_push, git_pull, git_log, git_branch_list; list_tests, run_tests, run_test_file.
 
 Meta — watch the "Context usage" note at the end of this prompt (it updates every turn); when it nears the limit and you're at a natural stopping point, call compact_context yourself rather than letting it trigger mid-task. Some tool calls need user approval: a denial means adjust your approach, not retry verbatim. When any tool fails, read the error and fix the root cause instead of blindly retrying.

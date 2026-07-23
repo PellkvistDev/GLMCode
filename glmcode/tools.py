@@ -641,6 +641,64 @@ def search_code(query: str, k: int = 6) -> str:
     return _truncate("\n".join(parts))
 
 
+_lsp_managers: dict = {}
+_lsp_lock = threading.Lock()
+
+
+def _lsp_manager():
+    from .lsp import LspManager
+    root = str(get_workdir())
+    with _lsp_lock:
+        m = _lsp_managers.get(root)
+        if m is None:
+            m = LspManager(get_workdir())
+            _lsp_managers[root] = m
+        return m
+
+
+def code_diagnostics(path: str) -> str:
+    """Real type errors / diagnostics for a file from its language server
+    (pyright, tsserver, gopls, ...). Static and usually instant -- catches
+    undefined names, type mismatches, unused imports, etc. WITHOUT running the
+    code. Run it on a file you just edited to check your work."""
+    from .lsp import available_for
+    p = _resolve(path)
+    if not p.is_file():
+        raise ToolErrorBase(f"file not found: {path}", ErrorSeverity.ERROR)
+    if not available_for(str(p)):
+        return (f"No language server is installed for {p.suffix or p.name} files, so static "
+                f"diagnostics aren't available here. (Verify by running the tests/build instead.)")
+    avail, diags = _lsp_manager().diagnostics(str(p))
+    if not avail:
+        return f"No language server is installed for {p.suffix} files."
+    if not diags:
+        return f"No problems reported by the language server for {p.name}."
+    order = {"error": 0, "warning": 1, "info": 2, "hint": 3}
+    diags.sort(key=lambda d: (order.get(d["severity"], 9), d["line"]))
+    lines = [f"{sum(1 for d in diags if d['severity'] == 'error')} error(s), "
+             f"{sum(1 for d in diags if d['severity'] == 'warning')} warning(s) in {p.name}:"]
+    for d in diags[:80]:
+        src = f" [{d['source']}]" if d.get("source") else ""
+        lines.append(f"  {d['severity']} {p.name}:{d['line']}:{d['character']} — {d['message']}{src}")
+    return _truncate("\n".join(lines))
+
+
+def go_to_definition(path: str, line: int, character: int) -> str:
+    """Ask the language server where the symbol at path:line:character is
+    defined (1-based). Precise where find_references/grep are only textual."""
+    from .lsp import available_for
+    p = _resolve(path)
+    if not p.is_file():
+        raise ToolErrorBase(f"file not found: {path}", ErrorSeverity.ERROR)
+    if not available_for(str(p)):
+        return f"No language server installed for {p.suffix or p.name} files (use find_references)."
+    avail, locs = _lsp_manager().definition(str(p), int(line), int(character))
+    if not locs:
+        return "The language server found no definition for the symbol at that position."
+    return "Defined at:\n" + "\n".join(f"  {loc['path']}:{loc['line']}:{loc['character']}"
+                                       for loc in locs)
+
+
 def find_references(symbol: str, path: str = ".", glob: str = "",
                     case_sensitive: bool = True, max_results: int = 200) -> str:
     """Find every occurrence of an exact identifier across the codebase,
@@ -1731,6 +1789,28 @@ TOOL_SCHEMAS = [
         ["query"],
     ),
     _schema(
+        "code_diagnostics",
+        "Real diagnostics (type errors, undefined names, unused imports, ...) for a file from its "
+        "language server — static and usually instant, WITHOUT running the code. Run it on a file "
+        "you just edited to catch mistakes before tests do. Returns errors/warnings with line "
+        "numbers, or says none were found. No-ops with a clear note if no server is installed for "
+        "that file type.",
+        {"path": {"type": "string", "description": "The file to check"}},
+        ["path"],
+    ),
+    _schema(
+        "go_to_definition",
+        "Ask the language server where the symbol at a given position is defined — precise "
+        "(understands scope/types) where find_references and grep are only textual. Positions are "
+        "1-based line and character.",
+        {
+            "path": {"type": "string", "description": "The file containing the symbol"},
+            "line": {"type": "integer", "description": "1-based line of the symbol"},
+            "character": {"type": "integer", "description": "1-based column of the symbol"},
+        },
+        ["path", "line", "character"],
+    ),
+    _schema(
         "run_powershell",
         "Run a Windows PowerShell command and return stdout/stderr/exit code. Use for running "
         "programs, tests, git, package managers. NOT for reading/searching files (use the file "
@@ -2346,6 +2426,8 @@ TOOL_FUNCTIONS = {
     "grep": grep,
     "find_references": find_references,
     "search_code": search_code,
+    "code_diagnostics": code_diagnostics,
+    "go_to_definition": go_to_definition,
     "run_powershell": run_powershell,
     "run_background": run_background,
     "read_output": read_output,
@@ -2382,9 +2464,10 @@ TOOL_FUNCTIONS = {
 # to a single small file outside any project, so a diff-preview permission
 # prompt would just be friction, not a meaningful safety check.
 READONLY_TOOLS = {"read_file", "list_dir", "glob", "grep", "find_references",
-                 "search_code", "todo_write", "remember", "show_image",
-                 "compact_context", "read_output", "stop_process",
-                 "list_processes", "review_changes"}
+                 "search_code", "code_diagnostics", "go_to_definition",
+                 "todo_write", "remember", "show_image", "compact_context",
+                 "read_output", "stop_process", "list_processes",
+                 "review_changes"}
 # Tools that modify files (auto-approved in autoedit mode).
 FILE_WRITE_TOOLS = {"write_file", "edit_file", "git_commit"}
 # Network read tools (prompt in ask mode, auto-approved in autoedit/yolo).
