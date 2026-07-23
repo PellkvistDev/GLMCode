@@ -2536,7 +2536,7 @@ function updateContextDonut(used) {
 }
 
 const MODES = ["ask", "autoedit", "yolo"];
-const MODE_LABEL = { ask: "ask", autoedit: "auto-edit", yolo: "full auto" };
+const MODE_LABEL = { ask: "Ask", autoedit: "Auto-edit", yolo: "Full auto" };
 let settings = {};
 
 function applyModeChip() {

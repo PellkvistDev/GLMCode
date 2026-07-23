@@ -38,6 +38,9 @@
       <div id="model-menu" class="model-menu" role="listbox" hidden></div>
     </div>
     <span id="usage-chip" class="chip" title="Model output tokens this chat (always free)">0 tok</span>
+    <button id="think-chip" class="chip chip-btn" title="Thinking effort — click to cycle (low / medium / high / max)">Medium</button>
+    <button id="mode-chip" class="chip chip-btn" title="Permission mode — click to cycle">Ask</button>
+    <span class="tb-sep" aria-hidden="true"></span>
     <button id="read-aloud-chip" class="icon-btn" aria-label="Read replies aloud" aria-pressed="false" title="Read replies aloud (off)">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
         <polygon points="4 9 8 9 12 5 12 19 8 15 4 15 4 9"/>
@@ -52,8 +55,6 @@
         <path d="M19 10v2a7 7 0 0 1-14 0v-2"/><line x1="12" y1="19" x2="12" y2="23"/>
       </svg>
     </button>
-    <button id="think-chip" class="chip chip-btn" title="Thinking effort — click to cycle (low / medium / high / max)">Medium</button>
-    <button id="mode-chip" class="chip chip-btn" title="Permission mode — click to cycle">ask</button>
     <button id="settings-btn" class="icon-btn" aria-label="Settings" title="Settings">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09a1.65 1.65 0 0 0-1-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09a1.65 1.65 0 0 0 1.51-1 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33h.01a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51h.01a1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82v.01a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
     </button>
@@ -72,7 +73,7 @@
 </nav>
 
 <!-- Chat -->
-<main id="chat" aria-live="polite">
+<main id="chat">
   <div id="welcome" class="welcome glass">
     <div class="welcome-mark" aria-hidden="true">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
@@ -110,7 +111,7 @@
 
 <!-- Status + composer -->
 <footer id="composer-wrap">
-  <div id="status-chip" class="status-chip glass" hidden>
+  <div id="status-chip" class="status-chip glass" role="status" aria-live="polite" hidden>
     <span class="spinner" aria-hidden="true"></span><span id="status-label"></span>
   </div>
   <div id="attachments" class="attachments" hidden></div>
