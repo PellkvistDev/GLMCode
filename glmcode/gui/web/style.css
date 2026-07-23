@@ -1040,21 +1040,26 @@ body.browser-full #subagent-panel-composer { grid-column: 2; grid-row: 4; }
   overflow: hidden;
   animation: rise var(--dur-3) var(--ease-out);
 }
-/* Stop button on a running, long-lived command box (dev server, watch,
-   hung test) -- overlays the top-right, replacing the "running" label. */
+/* Stop button on ANY running shell command (run_powershell, tests, a
+   background dev server). It's a hover-reveal like the code-block Copy button:
+   the "running…" label shows normally, and the Stop pill fades in over the
+   top-right corner when you hover the card (or focus it by keyboard), so you
+   can kill a command the model is mid-way through -- not just long-lived ones. */
 .tool-stop {
   position: absolute; top: 6px; right: 10px; z-index: 2;
   padding: 3px 13px; font-size: 11px; font-weight: 650; font-family: var(--font);
-  color: var(--del); background: rgba(255, 69, 58, 0.14);
-  border: 1px solid rgba(255, 69, 58, 0.42); border-radius: 999px;
-  cursor: pointer; transition: background 0.15s ease;
+  color: #ff9a92; background: rgba(46, 16, 18, 0.92);
+  border: 1px solid rgba(255, 69, 58, 0.55); border-radius: 999px;
+  cursor: pointer; opacity: 0;
+  transition: opacity var(--dur-1) var(--ease), background var(--dur-1) var(--ease);
 }
-.tool-stop:hover { background: rgba(255, 69, 58, 0.26); }
-.tool-stop:disabled { opacity: 0.6; cursor: default; }
-.tool:has(.tool-stop) .tool-state { display: none; }
-/* Reserve room so the absolutely-placed Stop button never sits on top of
-   the command summary (the box otherwise shrinks to its content). */
-.tool:has(.tool-stop) .tool-head { padding-right: 76px; }
+.tool:hover .tool-stop, .tool-stop:focus-visible { opacity: 1; }
+.tool-stop:hover { background: rgba(74, 22, 24, 0.96); color: #ffb4ad; }
+.tool-stop:disabled { opacity: 1; cursor: default; }
+/* While the Stop pill is revealed, hide the "running…" label underneath it so
+   the two never visually collide. */
+.tool:has(.tool-stop):hover .tool-state,
+.tool:has(.tool-stop:focus-visible) .tool-state { visibility: hidden; }
 .tool-head {
   display: flex; align-items: center; gap: 9px;
   padding: 8px 13px; cursor: pointer;
