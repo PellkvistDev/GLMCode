@@ -416,6 +416,15 @@ class PermissionEngine:
     # ------------------------------------------------------------------ #
 
     def _ask_file(self, name: str, args: dict, asker) -> Decision:
+        if name == "replace_in_files":
+            scope = args.get("glob") or "all files"
+            preview = (f"Find:    {str(args.get('find',''))[:200]}\n"
+                       f"Replace: {str(args.get('replace',''))[:200]}\n"
+                       f"Scope:   {scope}"
+                       + ("  (regex)" if args.get("regex") else ""))
+            answer = asker("Replace across files", preview,
+                           always_label="always allow replace_in_files this session")
+            return self._to_decision(answer, name=name)
         path = str(args.get("path", "?"))
         preview = build_diff_preview(name, args)
         title = f"{'Edit' if name == 'edit_file' else 'Write'} file: {path}"

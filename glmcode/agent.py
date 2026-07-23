@@ -42,7 +42,7 @@ from .tools import (BROWSER_ACTION_TOOLS, BROWSER_AGENT_SCHEMAS,
 # runs any of these gets one automatic push to verify before finishing.
 VERIFICATION_TOOLS = {"run_powershell", "run_background", "run_tests",
                       "run_test_file", "preview_page"}
-EDIT_TOOLS = {"write_file", "edit_file"}
+EDIT_TOOLS = {"write_file", "edit_file", "replace_in_files"}
 
 MAX_SUBAGENTS = 6
 # Safety cap on auto-continue-on-truncation rounds (see _call_model_until_done).

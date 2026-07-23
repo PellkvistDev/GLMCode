@@ -3963,6 +3963,7 @@ function applySession(res) {
   $("welcome").hidden = true;
   $("empty-hint").hidden = hasItems;
   if (!hasItems) $("empty-hint-folder").textContent = basename(res.cwd);
+  $("learn-project").hidden = !(res.needs_notes && !hasItems);
   renderHistory(res.items, res.todos);
   if (res.cwd_missing) toast(`Project folder not found: ${res.cwd}`, "warn", 6000);
   // Live chats may still be working when we switch to them.
@@ -3979,6 +3980,12 @@ function applySession(res) {
   populateModelPicker(); // each chat can use a different model -- refresh the footer
   refreshGithubRepo();   // update the sync chip for this chat's folder
 }
+
+$("learn-project").addEventListener("click", async () => {
+  $("learn-project").hidden = true;
+  const r = await api().generate_project_notes();
+  if (r && r.error) toast(r.error, "error", 4000);
+});
 
 async function newChat() {
   const autoBackup = $("newchat-backup").getAttribute("aria-checked") === "true";

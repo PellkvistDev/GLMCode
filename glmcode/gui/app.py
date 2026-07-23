@@ -1465,7 +1465,36 @@ class Api:
             "prompt_tokens": u.prompt_tokens, "completion_tokens": u.completion_tokens,
             "context": agent.context_estimate(),
             "busy": agent.busy,
+            "needs_notes": self._needs_project_notes(agent.workdir),
         }
+
+    @staticmethod
+    def _needs_project_notes(workdir: Path) -> bool:
+        """True for a real project folder that has no agent-notes file yet, so
+        the UI can offer to generate one. Skips the whiteboard and empty dirs."""
+        try:
+            if not workdir.is_dir() or workdir.resolve() == WHITEBOARD_DIR.resolve():
+                return False
+            from ..prompts import AGENT_MD_NAMES
+            if any((workdir / n).is_file() for n in AGENT_MD_NAMES):
+                return False
+            # Only offer when there's actually code/content to learn.
+            for entry in workdir.iterdir():
+                if entry.name.startswith("."):
+                    continue
+                if entry.is_file() or entry.is_dir():
+                    return True
+            return False
+        except OSError:
+            return False
+
+    def generate_project_notes(self):
+        """Kick off a turn that explores the project and writes a GLM.md."""
+        from ..prompts import GLM_MD_TASK
+        if self._active is None:
+            return {"error": "Open a chat first."}
+        self.send(GLM_MD_TASK)
+        return {"ok": True}
 
     def new_session(self, auto_backup: bool = True):
         """Start a brand-new chat. The user picks the project folder themselves —

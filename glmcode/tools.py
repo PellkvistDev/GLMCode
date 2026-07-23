@@ -428,6 +428,73 @@ def edit_file(path: str, old_string: str, new_string: str, replace_all: bool = F
     return f"Edited {p} ({n} replacement{'s' if n != 1 else ''}).{_syntax_feedback(p)}"
 
 
+def replace_in_files(find: str, replace: str, glob: str = "", path: str = ".",
+                     regex: bool = False, dry_run: bool = False,
+                     max_files: int = 300) -> str:
+    """Find-and-replace the SAME text across many files in one shot — for
+    renames/refactors that would otherwise be a dozen error-prone edit_file
+    calls. `dry_run` reports what would change without writing. Skips binary and
+    ignored files (node_modules, .git, …)."""
+    if not find:
+        raise ToolErrorBase("replace_in_files needs a non-empty 'find'.", ErrorSeverity.ERROR)
+    root = _resolve(path)
+    max_files = max(1, min(int(max_files), 2000))
+    try:
+        rx = re.compile(find) if regex else None
+    except re.error as e:
+        raise ToolErrorBase(f"invalid regex: {e}", ErrorSeverity.ERROR)
+
+    targets: list[Path] = [root] if root.is_file() else []
+    if root.is_dir():
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if not _should_skip_dir(d)]
+            for name in filenames:
+                if glob and not fnmatch.fnmatch(name, glob):
+                    continue
+                targets.append(Path(dirpath) / name)
+            if len(targets) > 40_000:
+                break
+
+    changed: list[tuple[str, int]] = []
+    total = 0
+    scanned = 0
+    for f in targets:
+        if len(changed) >= max_files:
+            break
+        if f.suffix in (".min.js", ".map", ".lock") or _is_binary(f):
+            continue
+        scanned += 1
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        if rx is not None:
+            new_text, n = rx.subn(replace, text)
+        else:
+            n = text.count(find)
+            new_text = text.replace(find, replace)
+        if n == 0 or new_text == text:
+            continue
+        rel = f.relative_to(root).as_posix() if root.is_dir() else f.name
+        changed.append((rel, n))
+        total += n
+        if not dry_run:
+            try:
+                f.write_text(new_text, encoding="utf-8", newline="\n")
+            except OSError as e:
+                raise ToolErrorBase(f"could not write {rel}: {e}", ErrorSeverity.ERROR)
+
+    if not changed:
+        return f"No occurrences of {find!r} found in {scanned} scanned file(s)."
+    verb = "Would replace" if dry_run else "Replaced"
+    head = (f"{verb} {total} occurrence(s) of {find!r} across {len(changed)} file(s)"
+            + (" (dry run — nothing written):" if dry_run else ":"))
+    lines = [head] + [f"  {rel}: {n}" for rel, n in changed[:100]]
+    if len(changed) > 100:
+        lines.append(f"  … and {len(changed) - 100} more files")
+    return _truncate("\n".join(lines))
+
+
 # --------------------------------------------------------------------- #
 # remember -- user-level memory, persists across every chat/project (unlike
 # GLM.md, which is per-project). Loaded into the system prompt by
@@ -697,6 +764,83 @@ def go_to_definition(path: str, line: int, character: int) -> str:
         return "The language server found no definition for the symbol at that position."
     return "Defined at:\n" + "\n".join(f"  {loc['path']}:{loc['line']}:{loc['character']}"
                                        for loc in locs)
+
+
+# Patterns for secrets that must never be committed. Deliberately high-signal
+# (specific token formats + private-key headers) to keep false positives low.
+_SECRET_PATTERNS = [
+    ("AWS access key id", re.compile(r"\bAKIA[0-9A-Z]{16}\b")),
+    ("GitHub token", re.compile(r"\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{36,}\b")),
+    ("GitHub fine-grained token", re.compile(r"\bgithub_pat_[A-Za-z0-9_]{60,}\b")),
+    ("Slack token", re.compile(r"\bxox[baprs]-[A-Za-z0-9-]{10,}\b")),
+    ("Google API key", re.compile(r"\bAIza[0-9A-Za-z_\-]{35}\b")),
+    ("OpenAI/Anthropic-style key", re.compile(r"\bsk-[A-Za-z0-9]{20,}\b")),
+    ("Stripe secret key", re.compile(r"\b(?:sk|rk)_live_[A-Za-z0-9]{20,}\b")),
+    ("Private key block", re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA |PGP )?PRIVATE KEY-----")),
+    ("Generic assigned secret", re.compile(
+        r"(?i)(?:api[_-]?key|secret|token|passwd|password)\s*[:=]\s*['\"][^'\"\s]{12,}['\"]")),
+]
+# Files where a "secret-looking" string is expected/harmless (examples, tests,
+# lockfiles) -- flagged more quietly.
+_SECRET_SOFT = ("example", "sample", ".lock", "test", "spec", "fixture", ".md")
+
+
+def _redact(match: str) -> str:
+    m = match.strip()
+    return (m[:4] + "…" + m[-2:]) if len(m) > 10 else "…"
+
+
+def scan_secrets(path: str = ".", max_hits: int = 200) -> str:
+    """Scan the project for hardcoded secrets that shouldn't be committed — API
+    keys, tokens, and private keys. Run it before committing, or whenever you've
+    added config/credentials. Reports file:line and the kind of secret (the value
+    itself is redacted). High-signal patterns; still eyeball each hit."""
+    root = _resolve(path)
+    max_hits = max(1, min(int(max_hits), 1000))
+    targets: list[Path] = [root] if root.is_file() else []
+    if root.is_dir():
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [d for d in dirnames if not _should_skip_dir(d)]
+            for name in filenames:
+                targets.append(Path(dirpath) / name)
+            if len(targets) > 40_000:
+                break
+    hits: list[str] = []
+    soft: list[str] = []
+    scanned = 0
+    for f in targets:
+        if len(hits) >= max_hits:
+            break
+        if f.suffix in (".min.js", ".map") or _is_binary(f):
+            continue
+        scanned += 1
+        try:
+            text = f.read_text(encoding="utf-8", errors="replace")
+        except OSError:
+            continue
+        rel = f.relative_to(root).as_posix() if root.is_dir() else f.name
+        low = rel.lower()
+        is_soft = any(s in low for s in _SECRET_SOFT)
+        for lineno, line in enumerate(text.splitlines(), 1):
+            if len(line) > 500:
+                continue
+            for label, rx in _SECRET_PATTERNS:
+                m = rx.search(line)
+                if m:
+                    entry = f"  {rel}:{lineno} — {label} ({_redact(m.group(0))})"
+                    (soft if is_soft else hits).append(entry)
+                    break
+    if not hits and not soft:
+        return f"No hardcoded secrets found in {scanned} scanned file(s)."
+    out = []
+    if hits:
+        out.append(f"⚠ {len(hits)} likely secret(s) found — do NOT commit these; move them to "
+                   f"environment variables or an ignored .env:")
+        out.extend(hits[:max_hits])
+    if soft:
+        out.append(f"\n{len(soft)} match(es) in example/test/doc files (usually fine, verify):")
+        out.extend(soft[:50])
+    return _truncate("\n".join(out))
 
 
 def post_pr_comment(number: int, body: str) -> str:
@@ -1837,6 +1981,35 @@ TOOL_SCHEMAS = [
         ["path", "line", "character"],
     ),
     _schema(
+        "replace_in_files",
+        "Find-and-replace the SAME text across MANY files at once — for a rename or refactor "
+        "that would otherwise be a dozen edit_file calls. Set dry_run:true first to preview which "
+        "files and how many occurrences would change, then run it for real. Use `glob` to scope "
+        "by filename (e.g. '*.ts') and regex:true for a pattern. Skips binary and ignored files. "
+        "Prefer find_references first when renaming a code symbol, to be sure you're not also "
+        "hitting unrelated text.",
+        {
+            "find": {"type": "string", "description": "Text (or regex if regex:true) to find"},
+            "replace": {"type": "string", "description": "Replacement text (may use \\1 groups if regex)"},
+            "glob": {"type": "string", "description": "Only files whose NAME matches, e.g. '*.py'"},
+            "path": {"type": "string", "description": "Root directory or file (default: cwd)"},
+            "regex": {"type": "boolean", "description": "Treat 'find' as a regular expression"},
+            "dry_run": {"type": "boolean", "description": "Preview only, don't write (default false)"},
+        },
+        ["find", "replace"],
+    ),
+    _schema(
+        "scan_secrets",
+        "Scan the project for hardcoded secrets that must not be committed — API keys, access "
+        "tokens, and private keys. Run it before a commit, or after adding config/credentials. "
+        "Reports file:line and the kind of secret found (values are redacted). High-signal, but "
+        "still confirm each hit.",
+        {
+            "path": {"type": "string", "description": "Directory or file to scan (default: cwd)"},
+        },
+        [],
+    ),
+    _schema(
         "post_pr_comment",
         "Post a comment (typically your review) to a GitHub pull request in this project's "
         "connected repo. Only use it when the user asks you to post — otherwise just show the "
@@ -2473,6 +2646,7 @@ TOOL_FUNCTIONS = {
     "read_file": read_file,
     "write_file": write_file,
     "edit_file": edit_file,
+    "replace_in_files": replace_in_files,
     "list_dir": list_dir,
     "glob": glob_files,
     "grep": grep,
@@ -2480,6 +2654,7 @@ TOOL_FUNCTIONS = {
     "search_code": search_code,
     "code_diagnostics": code_diagnostics,
     "go_to_definition": go_to_definition,
+    "scan_secrets": scan_secrets,
     "post_pr_comment": post_pr_comment,
     "run_powershell": run_powershell,
     "run_background": run_background,
@@ -2518,11 +2693,11 @@ TOOL_FUNCTIONS = {
 # prompt would just be friction, not a meaningful safety check.
 READONLY_TOOLS = {"read_file", "list_dir", "glob", "grep", "find_references",
                  "search_code", "code_diagnostics", "go_to_definition",
-                 "todo_write", "remember", "show_image", "compact_context",
-                 "read_output", "stop_process", "list_processes",
-                 "review_changes"}
+                 "scan_secrets", "todo_write", "remember", "show_image",
+                 "compact_context", "read_output", "stop_process",
+                 "list_processes", "review_changes"}
 # Tools that modify files (auto-approved in autoedit mode).
-FILE_WRITE_TOOLS = {"write_file", "edit_file", "git_commit"}
+FILE_WRITE_TOOLS = {"write_file", "edit_file", "replace_in_files", "git_commit"}
 # Network read tools (prompt in ask mode, auto-approved in autoedit/yolo).
 # view_image sends the image's bytes to the vision model, so it's gated the
 # same way even though it "just reads" a local file. package_info/
