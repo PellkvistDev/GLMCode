@@ -697,6 +697,11 @@ function handleBackgroundEvent(ev) {
       busySessions.add(ev.sid);
       renderSidebar();
       break;
+    case "bg_refresh":       // a scheduled task produced a new background chat
+      if (ev.sessions) sessions = ev.sessions;
+      if (ev.sid) unreadSessions.add(ev.sid);
+      renderSidebar();
+      break;
     case "turn_complete": {
       busySessions.delete(ev.sid);
       unreadSessions.add(ev.sid);
@@ -3152,6 +3157,78 @@ $("pathrule-add").addEventListener("click", async () => {
   toast(`Rule added: ${pathRuleAction} ${glob}`, "info", 2800);
 });
 
+/* ---- scheduled & watched tasks (Settings) ----------------------------- */
+
+let taskKind = "interval";
+function applyTaskKindUI() {
+  $("task-interval-row").hidden = taskKind !== "interval";
+  $("task-daily-row").hidden = taskKind !== "daily";
+  $("task-watch-row").hidden = taskKind !== "watch";
+  document.querySelectorAll("#task-kind button").forEach((b) => {
+    b.classList.toggle("on", b.dataset.v === taskKind);
+    b.setAttribute("aria-checked", String(b.dataset.v === taskKind));
+  });
+}
+document.querySelectorAll("#task-kind button").forEach((b) =>
+  b.addEventListener("click", () => { taskKind = b.dataset.v; applyTaskKindUI(); }));
+
+function renderTasksList(res) {
+  const list = $("tasks-list");
+  const tasks = (res && res.tasks) || [];
+  list.innerHTML = "";
+  for (const t of tasks) {
+    const row = document.createElement("div");
+    row.className = "provider-row";
+    row.innerHTML =
+      `<div class="provider-row-text"><span class="provider-name"></span>` +
+      `<span class="provider-sub"></span></div>` +
+      `<button class="switch task-en" role="switch"><span></span></button>` +
+      `<button class="icon-btn-mini task-run" title="Run now">▶</button>` +
+      `<button class="icon-btn-mini task-del" title="Delete">${CROSS_SVG}</button>`;
+    row.querySelector(".provider-name").textContent = t.name || "(task)";
+    const last = t.last_run ? " · last run " + new Date(t.last_run * 1000).toLocaleString() : "";
+    row.querySelector(".provider-sub").textContent = (t.desc || "") + last;
+    const en = row.querySelector(".task-en");
+    en.setAttribute("aria-checked", String(t.enabled !== false));
+    en.addEventListener("click", async () =>
+      renderTasksList(await api().set_scheduled_enabled(t.id, en.getAttribute("aria-checked") !== "true")));
+    row.querySelector(".task-run").addEventListener("click", async () => {
+      const r = await api().run_scheduled_task_now(t.id);
+      toast(r && r.error ? r.error : `Running “${t.name}” now…`, r && r.error ? "error" : "info", 3500);
+    });
+    row.querySelector(".task-del").addEventListener("click", async () =>
+      renderTasksList(await api().delete_scheduled_task(t.id)));
+    list.appendChild(row);
+  }
+  if (!list.children.length)
+    list.innerHTML = '<div class="row-sub">No scheduled tasks yet.</div>';
+}
+async function populateTasks() {
+  try { renderTasksList(await api().scheduled_tasks()); } catch (e) { /* ignore */ }
+  if (!$("task-folder").value && settings.cwd) $("task-folder").value = settings.cwd;
+  applyTaskKindUI();
+}
+$("task-folder-pick").addEventListener("click", async () => {
+  const r = await api().pick_task_folder();
+  if (r && r.path) $("task-folder").value = r.path;
+});
+$("task-save").addEventListener("click", async () => {
+  const prompt = $("task-prompt").value.trim();
+  const cwd = $("task-folder").value.trim();
+  if (!prompt) { toast("Describe what the task should do.", "error", 3000); return; }
+  if (!cwd) { toast("Choose a project folder.", "error", 3000); return; }
+  let schedule = { kind: taskKind };
+  if (taskKind === "interval") schedule.minutes = parseInt($("task-minutes").value, 10) || 60;
+  else if (taskKind === "daily") schedule.at = $("task-at").value || "09:00";
+  else schedule.path = cwd;
+  const res = await api().save_scheduled_task({ name: $("task-name").value.trim(), prompt, cwd, schedule });
+  if (res && res.error) { toast(res.error, "error", 5000); return; }
+  $("task-name").value = ""; $("task-prompt").value = "";
+  renderTasksList(res);
+  $("task-editor").open = false;
+  toast("Task saved.", "info", 2500);
+});
+
 $("prov-detect").addEventListener("click", async () => {
   const res = await api().detect_local_providers();
   if (res && res.error) { toast(res.error, "error", 6000); return; }
@@ -3316,6 +3393,7 @@ async function openSettings() {
   renderPathRules();
   refreshGithubEnv();
   refreshGithubRepo();
+  populateTasks();
   try {
     const u = await api().usage();
     $("session-usage").textContent =

@@ -380,6 +380,7 @@
       <button class="settings-tab-btn" data-tab="models" role="tab">Models &amp; tools</button>
       <button class="settings-tab-btn" data-tab="browser" role="tab">Browser</button>
       <button class="settings-tab-btn" data-tab="github" role="tab">GitHub</button>
+      <button class="settings-tab-btn" data-tab="tasks" role="tab">Tasks</button>
       <button class="settings-tab-btn" data-tab="chat" role="tab">Chat</button>
     </div>
 
@@ -730,6 +731,45 @@
           <div class="sheet-actions"><button id="gh-create-go" class="btn btn-primary">Create &amp; push</button></div>
         </div>
       </div>
+    </section>
+
+    <section data-tab="tasks">
+      <h3>Scheduled &amp; watched tasks</h3>
+      <p class="row-sub">Saved prompts that run themselves — on an interval, at a daily time, or when a
+        folder changes. Each runs in its project folder as a background chat and notifies you when it's
+        done. Nothing runs unless you add a task here.</p>
+      <div id="tasks-list" class="provider-list"></div>
+      <details id="task-editor">
+        <summary>Add a task…</summary>
+        <div class="provider-form">
+          <input id="task-name" class="text-input" placeholder="Name (optional)">
+          <textarea id="task-prompt" class="text-input" rows="2"
+            placeholder="What should it do? e.g. Update dependencies, run the tests, and sync to GitHub if they pass."></textarea>
+          <div class="task-folder-row">
+            <input id="task-folder" class="text-input" placeholder="Project folder (full path)">
+            <button id="task-folder-pick" class="btn btn-ghost">Choose…</button>
+          </div>
+          <div class="seg" id="task-kind" role="radiogroup" aria-label="Trigger">
+            <button data-v="interval" role="radio" class="on">Interval</button>
+            <button data-v="daily" role="radio">Daily</button>
+            <button data-v="watch" role="radio">On change</button>
+          </div>
+          <div id="task-interval-row" class="task-sched-row">
+            <label for="task-minutes">Every</label>
+            <input id="task-minutes" class="text-input mini" type="number" min="5" value="60">
+            <span class="row-sub">minutes (min 5)</span>
+          </div>
+          <div id="task-daily-row" class="task-sched-row" hidden>
+            <label for="task-at">At</label>
+            <input id="task-at" class="text-input mini" type="time" value="09:00">
+            <span class="row-sub">local time, once a day</span>
+          </div>
+          <div id="task-watch-row" class="task-sched-row" hidden>
+            <span class="row-sub">Fires when the project folder's files change (checked periodically).</span>
+          </div>
+          <div class="sheet-actions"><button id="task-save" class="btn btn-primary">Save task</button></div>
+        </div>
+      </details>
     </section>
 
     <section data-tab="chat">

@@ -167,6 +167,10 @@ class Config:
     # with /name in the composer. $INPUT in the template is replaced by any
     # text typed after the command (else appended).
     commands: list = field(default_factory=list)
+    # Scheduled & watched tasks: saved prompts that run themselves on an
+    # interval / at a daily time / when a folder changes (see scheduler.py).
+    # Each: {id, name, prompt, cwd, schedule, enabled, last_run, last_sig}.
+    scheduled_tasks: list = field(default_factory=list)
     # Scoped autonomy: per-path permission rules [{"glob", "action"}] where
     # action is allow | ask | deny. They override the permission mode for file
     # writes (see permissions.path_rule_action): trusted paths auto-approve even

@@ -658,6 +658,11 @@ class Api:
             "pnpm": "npm",
             "git": "git",
         })
+        # Scheduled/watched tasks: a lightweight poller fires the ones that are
+        # due. Daemon thread, started once; does nothing until the user creates
+        # a task (so there's no cost/behavior unless opted in).
+        self._sched_stop = threading.Event()
+        threading.Thread(target=self._scheduler_loop, daemon=True).start()
 
     # -- active-chat accessors ------------------------------------------- #
     # Most of this class predates parallel chats and talks about THE agent/
@@ -1708,6 +1713,133 @@ class Api:
                 ev.toast(f"GitHub sync failed: {e}", "warn")
             except Exception:
                 pass
+        threading.Thread(target=work, daemon=True).start()
+
+    # -- scheduled & watched tasks ----------------------------------------- #
+
+    def scheduled_tasks(self):
+        from .. import scheduler as sched
+        return {"tasks": [{**t, "desc": sched.describe(t)} for t in self._cfg.scheduled_tasks]}
+
+    def save_scheduled_task(self, task: dict):
+        from .. import scheduler as sched
+        norm = sched.normalize_task(task or {})
+        if norm is None:
+            return {"error": "That task is missing a prompt, folder, or a valid schedule."}
+        tasks = self._cfg.scheduled_tasks
+        # For a watch task, record the current baseline so it fires on the NEXT
+        # change, not immediately.
+        if norm["schedule"]["kind"] == "watch" and not norm["last_sig"]:
+            norm["last_sig"] = sched.folder_signature(norm["schedule"]["path"])
+        for i, t in enumerate(tasks):
+            if t.get("id") == norm["id"]:
+                tasks[i] = norm
+                break
+        else:
+            if len(tasks) >= sched.MAX_TASKS:
+                return {"error": "You have the maximum number of scheduled tasks."}
+            tasks.append(norm)
+        save_config(self._cfg)
+        return self.scheduled_tasks()
+
+    def delete_scheduled_task(self, task_id: str):
+        self._cfg.scheduled_tasks = [t for t in self._cfg.scheduled_tasks
+                                     if t.get("id") != task_id]
+        save_config(self._cfg)
+        return self.scheduled_tasks()
+
+    def set_scheduled_enabled(self, task_id: str, enabled: bool):
+        for t in self._cfg.scheduled_tasks:
+            if t.get("id") == task_id:
+                t["enabled"] = bool(enabled)
+        save_config(self._cfg)
+        return self.scheduled_tasks()
+
+    def run_scheduled_task_now(self, task_id: str):
+        for t in self._cfg.scheduled_tasks:
+            if t.get("id") == task_id:
+                self._fire_scheduled_task(t)
+                t["last_run"] = time.time()
+                save_config(self._cfg)
+                return {"ok": True}
+        return {"error": "task not found"}
+
+    def pick_task_folder(self):
+        try:
+            picked = self._window.create_file_dialog(webview.FOLDER_DIALOG)
+        except Exception:
+            picked = None
+        if not picked:
+            return {"cancelled": True}
+        path = picked[0] if isinstance(picked, (list, tuple)) else picked
+        return {"path": str(path)}
+
+    def _scheduler_loop(self) -> None:
+        from .. import scheduler as sched
+        while not self._sched_stop.wait(30):
+            try:
+                tasks = self._cfg.scheduled_tasks
+                if not tasks:
+                    continue
+                now = time.time()
+                dirty = False
+                for t in tasks:
+                    kind = t.get("schedule", {}).get("kind")
+                    sig = (sched.folder_signature(t["schedule"]["path"])
+                           if kind == "watch" else None)
+                    if t.get("enabled", True) and sched.is_due(t, now, sig):
+                        self._fire_scheduled_task(t)
+                        t["last_run"] = now
+                        if kind == "watch":
+                            t["last_sig"] = sig
+                        dirty = True
+                    elif kind == "watch" and sig and not t.get("last_sig"):
+                        t["last_sig"] = sig   # establish the baseline
+                        dirty = True
+                if dirty:
+                    save_config(self._cfg)
+            except Exception:
+                pass   # a scheduler hiccup must never take the app down
+
+    def _fire_scheduled_task(self, task: dict) -> None:
+        """Run a task's prompt headlessly in its project folder as a background
+        chat (shows up in the sidebar), then notify. Best-effort."""
+        cwd = task.get("cwd", "")
+        if not cwd or not Path(cwd).is_dir():
+            return
+        client = self._ensure_client()
+        if client is None:
+            return
+        sid = new_id()
+        workdir = Path(cwd)
+        events = self._make_events(sid)
+        agent = Agent(self._cfg, client, events=events, workdir=workdir)
+        agent.mcp = self._mcp
+        cs = ChatState(sid, agent, events)
+        cs.title = (task.get("name") or "Scheduled task")[:60]
+        self._chats[sid] = cs
+        if backup_module.available():
+            cs.backup_repo = BackupRepo(sid, workdir)
+            agent.backup_repo = cs.backup_repo
+        agent.transcript = Transcript(sid, cwd=str(workdir))
+        agent.rebuild_system_prompt()
+
+        def work():
+            try:
+                agent.run_turn({"role": "user", "content": task["prompt"]})
+            except Exception as e:
+                events.error(f"scheduled task failed: {e}")
+            finally:
+                self._save_chat(cs)
+                try:
+                    self._maybe_autopush(cs)
+                except Exception:
+                    pass
+                try:
+                    events.emit("bg_refresh", sessions=self.list_sessions())
+                except Exception:
+                    pass
+                notify(APP_NAME, f"Scheduled task “{cs.title}” finished.")
         threading.Thread(target=work, daemon=True).start()
 
     def open_session(self, sid: str):
