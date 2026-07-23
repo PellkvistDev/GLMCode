@@ -3779,7 +3779,7 @@ const voice = {
   active: false, ptt: false, stream: null, ctx: null, analyser: null, data: null,
   timer: 0, rec: null, chunks: [], recording: false, confirmed: false, discard: false,
   speaking: false, thinking: false, transcribing: false, turnComplete: true,
-  voiceFrames: 0, voicedMs: 0, silenceMs: 0, recMs: 0,
+  voiceFrames: 0, voicedMs: 0, silenceMs: 0, recMs: 0, peak: 0,
   noiseFloor: 0.01, sens: 1.0, announceQ: [], workers: {}, sendTries: 0,
   perm: null, permQ: [], muted: false, pttKey: "Space", endpointMs: 750,
   waveRaf: 0, lastReply: [], replyChunks: [], curTurnEl: null, replyEl: null,
@@ -3801,6 +3801,8 @@ const V_ONSET_MS = 100;        // voiced time before an utterance is "confirmed"
 const V_SILENCE_MS = 750;      // trailing silence that ends a confirmed utterance
 const V_BLIP_MS = 300;         // unconfirmed clip abandoned after this much silence
 const V_MAX_UNCONFIRMED_MS = 1500;  // give up on a clip that never becomes real speech
+const V_MAX_UTTERANCE_MS = 15000;   // hard cap: never record forever, always send what we have
+const V_SILENCE_FRAC = 0.15;   // silence = energy below this fraction of how loud you actually got
 const V_NF_ADAPT = 0.02;       // how fast the idle noise-floor estimate tracks the room
 
 const startThresh = () => Math.max(V_ABS_MIN, voice.noiseFloor * V_START_MULT) / voice.sens;
@@ -3961,7 +3963,16 @@ function vadTick() {
 
 function recordingTick(e) {
   voice.recMs += V_FRAME_MS;
-  if (e > stopThresh()) { voice.voicedMs += V_FRAME_MS; voice.silenceMs = 0; }
+  // Track how loud this utterance actually got (decaying, so an early loud
+  // burst doesn't make everything after look like silence).
+  voice.peak = Math.max(e, (voice.peak || 0) * 0.995);
+  // Silence = energy has dropped below BOTH the calibrated floor and a fraction
+  // of your own speaking level. The relative part is the fix for "it never
+  // responds": if the room is a bit noisier than calibration assumed, ambient
+  // can sit above the fixed threshold forever -- but it's still far below how
+  // loud you were talking, so the relative test still detects that you stopped.
+  const silenceLevel = Math.max(stopThresh(), voice.peak * V_SILENCE_FRAC);
+  if (e > silenceLevel) { voice.voicedMs += V_FRAME_MS; voice.silenceMs = 0; }
   else { voice.silenceMs += V_FRAME_MS; }
   // Enough real voiced audio -> this is a genuine utterance. If it arrived
   // while the agent was talking or thinking, that's a barge-in: cut its reply.
@@ -3977,7 +3988,9 @@ function recordingTick(e) {
     }
   }
   if (voice.confirmed) {
-    if (voice.silenceMs >= voice.endpointMs) endUtterance();
+    // End on trailing silence, OR a hard cap so a stuck endpoint can never
+    // leave it recording forever with no response.
+    if (voice.silenceMs >= voice.endpointMs || voice.recMs >= V_MAX_UTTERANCE_MS) endUtterance();
   } else if (voice.silenceMs >= V_BLIP_MS || voice.recMs >= V_MAX_UNCONFIRMED_MS) {
     endUtterance();  // never became real speech -- drop it
   }
@@ -4000,6 +4013,7 @@ function startUtterance() {
   voice.voicedMs = 0;
   voice.silenceMs = 0;
   voice.recMs = 0;
+  voice.peak = 0;
   voice.rec.ondataavailable = (ev) => { if (ev.data && ev.data.size) voice.chunks.push(ev.data); };
   voice.rec.onstop = finishUtterance;
   // Small timeslices so short utterances still flush at least one data chunk.
