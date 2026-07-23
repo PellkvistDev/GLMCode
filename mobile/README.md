@@ -52,12 +52,22 @@ This was built security-first ("MAKE IT SECURE!"). The guarantees:
 | `style.css` | Phone-first dark styling, no external assets. |
 | `manifest.webmanifest`, `sw.js` | Installable, offline-capable PWA. |
 
-## Hosting it
+## Hosting it — free
 
-Serve the `mobile/` folder over **HTTPS** from any static host (GitHub Pages,
-Cloudflare Pages, Netlify) — it's all static files, no server code. Then open it
-on your phone and "Add to Home Screen". Because everything sensitive is encrypted
-client-side with your PIN, the host never sees your keys or your code.
+It's all static files, so hosting is **free**. This repo ships a GitHub Pages
+workflow (`.github/workflows/pages.yml`) that publishes the `mobile/` folder on
+every push to `main`. To turn it on once:
+
+1. **Settings → Pages → Build and deployment → Source: GitHub Actions.**
+2. Push to `main` (or run the *Deploy phone app to GitHub Pages* workflow by
+   hand). The job prints the live URL — something like
+   `https://<you>.github.io/<repo>/`.
+3. Open that URL on your phone → **Add to Home Screen**.
+
+Only the `mobile/` folder is published, so nothing else in the repo is exposed,
+and because everything sensitive is encrypted client-side with your PIN, the
+host (GitHub) never sees your keys or your code. Any other static host works too
+(Cloudflare Pages, Netlify) — just serve `mobile/` over HTTPS.
 
 > **Note on CORS:** `api.github.com` sends permissive CORS headers, so browser
 > calls work directly. Some model endpoints may not allow browser origins; if
