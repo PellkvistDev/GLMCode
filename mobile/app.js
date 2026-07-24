@@ -182,12 +182,15 @@
     session.messages = [{ role: "system", content: session.baseSystem }];
     session.turnCommits = 0;
     const onCommit = (p) => { session.turnCommits = (session.turnCommits || 0) + 1; toast("committed " + p); };
+    session.images = {};   // name -> data URL, for view_image
     // Sub-agent tools have NO spawn (depth 1); the main tools add spawn_agent.
-    session.subTools = AC.makeTools(session.gh, { confirmWrite, onCommit });
-    session.tools = AC.makeTools(session.gh, { confirmWrite, onCommit, spawn: runSubAgent });
+    // Both can view images (via the vision model).
+    session.subTools = AC.makeTools(session.gh, { confirmWrite, onCommit, viewImage });
+    session.tools = AC.makeTools(session.gh, { confirmWrite, onCommit, spawn: runSubAgent, viewImage });
     // Read-only subset for plan mode.
     session.readTools = {};
     for (const n of READ_TOOL_NAMES) session.readTools[n] = session.tools[n];
+    session.readTools.view_image = session.tools.view_image;   // let planning look at images too
     clearAttachments();
     $("chat-repo-name").textContent = fullName;
     $("messages").innerHTML = "";
@@ -270,12 +273,21 @@
         parts.push("=== " + a.name + " ===\n" + a.text);
       } else if (a.kind === "image") {
         images.push(a);
+        session.images = session.images || {};
+        session.images[a.name] = a.dataUrl;   // make it viewable via view_image
       }
     }
     const ctx = parts.length ? "Attached files for context:\n\n" + parts.join("\n\n") + "\n\n---\n\n" : "";
-    const body = ctx + (text || (images.length ? "(see attached image)" : "(see attached files)"));
+    let body = ctx + (text || (images.length ? "(see attached image)" : "(see attached files)"));
     if (!images.length) return body;
-    return [{ type: "text", text: body }].concat(images.map((im) => ({ type: "image_url", image_url: { url: im.dataUrl } })));
+    // A vision model sees the images directly; a text model gets a note telling
+    // it to call view_image (which routes through the free vision model).
+    if (isVisionModel(getModelName())) {
+      return [{ type: "text", text: body }].concat(images.map((im) => ({ type: "image_url", image_url: { url: im.dataUrl } })));
+    }
+    body += "\n\n[Attached image(s): " + images.map((i) => i.name).join(", ") +
+      ". Call view_image(name, question) to look at them.]";
+    return body;
   }
 
   $("btn-attach").addEventListener("click", openFilePicker);
@@ -372,8 +384,45 @@
     });
   }
 
+  const VISION_MODEL = "glm-4.6v-flash";  // free vision model, used by view_image
+
+  // Add view_image when the user has attached images and the chat model can't
+  // see them itself (a text/coding model). A vision model sees them directly.
+  function visionSchemas(base) {
+    const has = session.images && Object.keys(session.images).length;
+    return (has && !isVisionModel(getModelName())) ? base.concat([AC.VIEW_IMAGE_SCHEMA]) : base;
+  }
   // Advertise spawn_agent on the main turn only when sub-agents are enabled.
-  function mainSchemas() { return subagentsOn() ? AC.TOOL_SCHEMAS.concat([AC.SPAWN_SCHEMA]) : AC.TOOL_SCHEMAS; }
+  function mainSchemas() {
+    const base = subagentsOn() ? AC.TOOL_SCHEMAS.concat([AC.SPAWN_SCHEMA]) : AC.TOOL_SCHEMAS;
+    return visionSchemas(base);
+  }
+
+  // The view_image tool: send an attached image to the free vision model and
+  // return its written description, so a text model can act on the image.
+  async function viewImage(name, question) {
+    const imgs = session.images || {};
+    const keys = Object.keys(imgs);
+    let url = imgs[name];
+    if (!url) {
+      const hit = keys.find((k) => k === name || k.endsWith(name) || name.endsWith(k) || k.includes(name));
+      url = hit ? imgs[hit] : (keys.length === 1 ? imgs[keys[0]] : null);
+    }
+    if (!url) return "No attached image matches '" + name + "'. Available: " + (keys.join(", ") || "none");
+    if (!session.visionModel) {
+      session.visionModel = AC.makeModel({ apiKey: session.secrets.modelKey, model: VISION_MODEL, baseUrl: session.secrets.baseUrl });
+    }
+    const focus = (question && question.trim()) ? "Focus on: " + question.trim() : "Describe the image in detail.";
+    setStatus("looking with " + VISION_MODEL + "…");
+    try {
+      const resp = await session.visionModel.chat(
+        [{ role: "user", content: [{ type: "text", text: "You are a vision assistant. " + focus }, { type: "image_url", image_url: { url } }] }],
+        undefined);
+      return ((resp && resp.content) || "").trim() || "(the vision model returned no description)";
+    } catch (e) {
+      return "Couldn't analyze the image: " + (e && e.message ? e.message : e);
+    }
+  }
 
   // A normal build turn, plus one Max self-review pass when it changed files.
   async function runBuild(getStopped) {
@@ -396,7 +445,7 @@
     let liveTool = null, report = "";
     await AC.runAgent({
       model: session.model, tools: session.subTools, messages,
-      toolSchemas: AC.TOOL_SCHEMAS, maxSteps: 16, shouldStop: () => stopFlag,
+      toolSchemas: visionSchemas(AC.TOOL_SCHEMAS), maxSteps: 16, shouldStop: () => stopFlag,
       onEvent: (ev) => {
         armIdle();
         if (ev.type === "tool") { liveTool = addTool("↳ " + ev.name, ev.args); setStatus("sub · " + ev.name + "…"); }
@@ -425,9 +474,6 @@
     const text = prompt.value.trim();
     if (!text && !attachments.length) return;
     prompt.value = ""; prompt.style.height = "auto";
-    if (attachments.some((a) => a.kind === "image") && !isVisionModel(getModelName())) {
-      toast("Images need a vision model — set glm-4.6v-flash in Settings.");
-    }
     addBubble("user", (text || "(attached files)") + attachmentNote());
     const content = await composeMessage(text);   // fetches + prepends any attachments
     clearAttachments();
