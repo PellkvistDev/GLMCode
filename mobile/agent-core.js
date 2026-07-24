@@ -246,6 +246,11 @@
     if (opts.spawn) {
       api.spawn_agent = async (a) => String(await opts.spawn(a.task || "", a.context || ""));
     }
+    // Vision: describe an attached image via the free vision model, so a text
+    // (coding) model can still "see" it. Wired by the host when images exist.
+    if (opts.viewImage) {
+      api.view_image = async (a) => String(await opts.viewImage(a.name || "", a.question || ""));
+    }
     return api;
   }
 
@@ -271,6 +276,14 @@
     "Use it to keep big tasks organised; do the work yourself for small ones.",
     { task: str("The self-contained task for the sub-agent"), context: str("Anything it should know: constraints, files, goals") },
     ["task"]);
+
+  // Advertised when the user has attached image(s) and the chat model can't see
+  // them itself; routes the image through the free vision model for a writeup.
+  const VIEW_IMAGE_SCHEMA = tool("view_image",
+    "Look at an attached image via the vision model and get a text description. Use it whenever the user " +
+    "attached an image you need to understand. Give the image's name and, optionally, a focused question.",
+    { name: str("The attached image's file name"), question: str("What to look for (optional)") },
+    ["name"]);
 
   // --- the agent loop ------------------------------------------------------
   async function runAgent(cfg) {
@@ -319,7 +332,7 @@
 
   const CoreAPI = {
     encryptVault, decryptVault, deriveKey, PBKDF2_ITERS,
-    makeGitHub, makeModel, makeTools, runAgent, TOOL_SCHEMAS, SPAWN_SCHEMA,
+    makeGitHub, makeModel, makeTools, runAgent, TOOL_SCHEMAS, SPAWN_SCHEMA, VIEW_IMAGE_SCHEMA,
     SYSTEM_PROMPT, SUBAGENT_PROMPT,
     _b64: { bytesToB64, b64ToBytes },
   };

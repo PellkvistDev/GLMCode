@@ -202,6 +202,19 @@ test("tools: spawn_agent exists only when a spawner is wired, and forwards args"
   assert.equal(out, "sub done: add tests");
 });
 
+test("tools: view_image exists only when a viewer is wired, and forwards args", async () => {
+  const plain = toolsOverFiles({ "a.txt": "x" });
+  assert.equal(typeof plain.view_image, "undefined");
+
+  let got = null;
+  const withViewer = toolsOverFiles({ "a.txt": "x" }, {
+    viewImage: async (name, question) => { got = { name, question }; return "a red logo on white"; },
+  });
+  const out = await withViewer.view_image({ name: "logo.png", question: "what colour?" });
+  assert.deepEqual(got, { name: "logo.png", question: "what colour?" });
+  assert.equal(out, "a red logo on white");
+});
+
 // ------------------------------------------------------------- agent loop --
 
 test("runAgent: executes a tool call then returns the final answer", async () => {
